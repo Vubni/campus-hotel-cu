@@ -66,7 +66,7 @@ class Profile(Base):
 
     # Направление: dev | business | design | ai | undecided
     track = Column(String(20), nullable=False, default="undecided")
-    course = Column(Integer, nullable=True)  # не используется, см. age
+    course = Column(Integer, nullable=False, default=1)  # курс, 1..6
     bio = Column(Text, nullable=False, default="")
 
     # 2, 3, 4 или NULL — «не предпочтительно», подойдёт любая комната.
@@ -74,7 +74,14 @@ class Profile(Base):
     room_capacity = Column(Integer, nullable=True)
     sleep_schedule = Column(String(20), nullable=False, default="any")  # "lark" | "owl" | "any"
     smoking = Column(String(20), nullable=False, default="no")  # "yes" | "no" | "vape"
-    cleanliness = Column(Integer, nullable=False, default=3)  # 1..5
+    # Аккуратность (бывшая «чистоплотность»): relaxed | medium | neat
+    tidiness = Column(String(20), nullable=False, default="medium")
+    # Подъём утром: alarm_one (1 будильник) | alarm_many (10 будильников) | natural (само)
+    wakeup = Column(String(20), nullable=False, default="alarm_one")
+    # Готовка: self (сам) | together (вместе) | delivery (доставка/рестораны)
+    cooking = Column(String(20), nullable=False, default="self")
+    # Гости: often (часто) | sometimes (иногда) | never (не зову)
+    guests = Column(String(20), nullable=False, default="sometimes")
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

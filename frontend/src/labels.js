@@ -23,8 +23,36 @@ export const SMOKING = {
   vape: "💨 Электронки",
 };
 
-export function cleanlinessLabel(level) {
-  return "🧹".repeat(level) + `  ${level}/5`;
+// Аккуратность (бывшая «чистоплотность»): три режима.
+export const TIDINESS = {
+  relaxed: "🧦 Расслабленно",
+  medium: "🧹 Умеренно",
+  neat: "✨ Аккуратно",
+};
+
+// Подъём утром.
+export const WAKEUP = {
+  alarm_one: "⏰ Один будильник",
+  alarm_many: "😴 Десять будильников",
+  natural: "🌤️ Просыпаюсь сам",
+};
+
+// Готовка.
+export const COOKING = {
+  self: "🍳 Готовлю сам",
+  together: "🥘 Готовим вместе",
+  delivery: "🛵 Доставка и кафе",
+};
+
+// Гости.
+export const GUESTS = {
+  often: "🎉 Часто зову гостей",
+  sometimes: "🙂 Иногда гости",
+  never: "🚪 Не зову гостей",
+};
+
+export function courseLabel(course) {
+  return `🎓 ${course} курс`;
 }
 
 // capacity === null — «не предпочтительно»: подойдёт комната любого размера.

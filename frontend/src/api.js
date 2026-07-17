@@ -151,3 +151,17 @@ export async function createProfile(profile) {
   }
   return res.json();
 }
+
+export async function updateProfile(id, profile) {
+  const res = await fetch(`${BASE}/profiles/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  return jsonOrThrow(res, "Не удалось сохранить анкету");
+}
+
+export async function deleteProfile(id) {
+  const res = await fetch(`${BASE}/profiles/${id}`, { method: "DELETE" });
+  return jsonOrThrow(res, "Не удалось удалить анкету");
+}

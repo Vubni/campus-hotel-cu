@@ -106,6 +106,57 @@ def ensure_columns() -> None:
         )
         conn.execute(text("ALTER TABLE profiles ALTER COLUMN track SET NOT NULL"))
 
+        # Курс: раньше не собирался (колонка была nullable) — теперь всем по
+        # умолчанию 1-й, чтобы не остаться с NULL после включения NOT NULL.
+        conn.execute(
+            text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS course INTEGER")
+        )
+        conn.execute(text("UPDATE profiles SET course = 1 WHERE course IS NULL"))
+        conn.execute(
+            text("ALTER TABLE profiles ALTER COLUMN course SET DEFAULT 1")
+        )
+        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course SET NOT NULL"))
+
+        # Новые бытовые поля анкеты.
+        for column, default in (
+            ("wakeup", "alarm_one"),
+            ("cooking", "self"),
+            ("guests", "sometimes"),
+        ):
+            conn.execute(
+                text(
+                    f"ALTER TABLE profiles ADD COLUMN IF NOT EXISTS {column} "
+                    f"VARCHAR(20) NOT NULL DEFAULT '{default}'"
+                )
+            )
+
+        # Чистоплотность (1..5) → аккуратность (relaxed | medium | neat).
+        conn.execute(
+            text(
+                "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tidiness "
+                "VARCHAR(20) NOT NULL DEFAULT 'medium'"
+            )
+        )
+        has_cleanliness = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'profiles' AND column_name = 'cleanliness'"
+            )
+        ).first()
+        if has_cleanliness:
+            conn.execute(
+                text(
+                    """
+                    UPDATE profiles SET tidiness = CASE
+                        WHEN cleanliness <= 2 THEN 'relaxed'
+                        WHEN cleanliness >= 4 THEN 'neat'
+                        ELSE 'medium'
+                    END
+                    """
+                )
+            )
+            conn.execute(text("ALTER TABLE profiles DROP COLUMN cleanliness"))
+
 
 @app.on_event("startup")
 def on_startup():
@@ -276,6 +327,81 @@ def create_profile(payload: schemas.ProfileCreate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(profile)
     return profile
+
+
+@app.put("/api/profiles/{profile_id}", response_model=schemas.ProfileOut)
+def update_profile(
+    profile_id: int,
+    payload: schemas.ProfileUpdate,
+    db: Session = Depends(get_db),
+):
+    """Редактирование своей анкеты.
+
+    Полноценной авторизации нет: правит тот, у кого в браузере сохранён id.
+    Пол не трогаем (он влияет на подбор компании), а подтверждённый через
+    Telegram ник менять нельзя — иначе подтверждение потеряет смысл.
+    """
+    profile = _get_profile_or_404(db, profile_id)
+    data = payload.model_dump()
+
+    # Пол задаётся один раз при создании и дальше не меняется.
+    data.pop("gender", None)
+    if profile.telegram_verified:
+        data.pop("telegram", None)
+    else:
+        data["telegram"] = payload.telegram.lstrip("@").strip()
+
+    for key, value in data.items():
+        setattr(profile, key, value)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@app.delete("/api/profiles/{profile_id}", status_code=204)
+async def delete_profile(profile_id: int, db: Session = Depends(get_db)):
+    """Удаление своей анкеты: заодно выводим из компании и чистим заявки."""
+    profile = _get_profile_or_404(db, profile_id)
+
+    group = profile.group if profile.group_id else None
+    leftovers: List[models.Profile] = []
+    left_name = profile.name
+    if group:
+        profile.group_id = None
+        db.flush()
+        db.refresh(group)
+        leftovers = [m for m in group.members]
+
+    # Свои исходящие заявки закрываем как отменённые.
+    db.query(models.JoinRequest).filter(
+        models.JoinRequest.profile_id == profile.id,
+        models.JoinRequest.status == join_flow.PENDING,
+    ).update({"status": join_flow.CANCELLED, "decided_at": datetime.utcnow()})
+
+    decided = []
+    if group:
+        # Состав комнаты изменился — часть заявок могла «дозреть».
+        for req in list(group.requests):
+            if req.status == join_flow.PENDING:
+                new_status = join_flow.evaluate(db, req)
+                if new_status != join_flow.PENDING:
+                    decided.append((req, new_status))
+
+    db.delete(profile)
+    if group and not group.members:
+        db.delete(group)
+    db.commit()
+
+    for member in leftovers:
+        if member.telegram_chat_id:
+            await notifier.send_message(
+                member.telegram_chat_id,
+                f"🚪 <b>{left_name}</b> удалил(а) анкету и вышел(а) из комнаты.\n"
+                f"Свободных мест стало больше: {config.SITE_URL}",
+            )
+    for req, status in decided:
+        await _notify_decision(req, status)
+    return None
 
 
 def _get_profile_or_404(db: Session, profile_id: int) -> models.Profile:

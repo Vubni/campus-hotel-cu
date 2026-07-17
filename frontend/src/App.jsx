@@ -45,10 +45,10 @@ export default function App() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showModal, setShowModal] = useState(false);
+  const [modal, setModal] = useState(null); // null | "create" | "edit"
   const [busy, setBusy] = useState(false);
 
-  const { myProfile, remember, reloadMe } = useMyProfile();
+  const { myProfile, remember, forget, reloadMe } = useMyProfile();
 
   function chooseGender(value) {
     localStorage.setItem(GENDER_KEY, value);
@@ -109,10 +109,23 @@ export default function App() {
   }, [filters, gender]);
 
   function handleCreated(profile) {
-    setShowModal(false);
+    setModal(null);
     setFilters(EMPTY_FILTERS);
     remember(profile); // запоминаем как «мою анкету»
     setProfiles((prev) => [profile, ...prev]);
+  }
+
+  function handleUpdated(profile) {
+    setModal(null);
+    remember(profile); // обновляем «мою анкету»
+    // Если анкета в ленте (без компании) — освежаем её на месте.
+    setProfiles((prev) => prev.map((p) => (p.id === profile.id ? profile : p)));
+  }
+
+  async function handleDeleted() {
+    setModal(null);
+    forget();
+    await refresh();
   }
 
   useEffect(() => {
@@ -183,14 +196,25 @@ export default function App() {
               {GENDER_WORD[gender]}
               <span className="header__gender-change">сменить</span>
             </button>
-            <button
-              className="header__cta"
-              onClick={() => setShowModal(true)}
-            >
-              <span className="header__cta-full">Разместить анкету</span>
-              <span className="header__cta-short">+ Анкета</span>
-              <span className="header__cta-icon" aria-hidden="true">+</span>
-            </button>
+            {myProfile ? (
+              <button
+                className="header__cta"
+                onClick={() => setModal("edit")}
+              >
+                <span className="header__cta-full">Моя анкета</span>
+                <span className="header__cta-short">Анкета</span>
+                <span className="header__cta-icon" aria-hidden="true">✎</span>
+              </button>
+            ) : (
+              <button
+                className="header__cta"
+                onClick={() => setModal("create")}
+              >
+                <span className="header__cta-full">Разместить анкету</span>
+                <span className="header__cta-short">+ Анкета</span>
+                <span className="header__cta-icon" aria-hidden="true">+</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -320,11 +344,14 @@ export default function App() {
         Кампус-отель Диск · сервис поиска соседей по комнате в общежитии
       </footer>
 
-      {showModal && (
+      {modal && (
         <AddProfileModal
           gender={gender}
-          onClose={() => setShowModal(false)}
+          profile={modal === "edit" ? myProfile : null}
+          onClose={() => setModal(null)}
           onCreated={handleCreated}
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
         />
       )}
     </div>

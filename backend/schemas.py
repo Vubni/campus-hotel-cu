@@ -6,6 +6,10 @@ from pydantic import BaseModel, Field
 
 TRACK_PATTERN = "^(dev|business|design|ai|undecided)$"
 SMOKING_PATTERN = "^(yes|no|vape)$"
+TIDINESS_PATTERN = "^(relaxed|medium|neat)$"
+WAKEUP_PATTERN = "^(alarm_one|alarm_many|natural)$"
+COOKING_PATTERN = "^(self|together|delivery)$"
+GUESTS_PATTERN = "^(often|sometimes|never)$"
 
 
 class ProfileBase(BaseModel):
@@ -16,13 +20,17 @@ class ProfileBase(BaseModel):
 
     # Направление вместо факультета: фиксированный список из пяти.
     track: str = Field("undecided", pattern=TRACK_PATTERN)
+    course: int = Field(1, ge=1, le=6)
     bio: str = ""
 
     # None — «не предпочтительно»: подойдёт комната любого размера.
     room_capacity: Optional[int] = Field(None, ge=2, le=4)
     sleep_schedule: str = Field("any", pattern="^(lark|owl|any)$")
     smoking: str = Field("no", pattern=SMOKING_PATTERN)
-    cleanliness: int = Field(3, ge=1, le=5)
+    tidiness: str = Field("medium", pattern=TIDINESS_PATTERN)
+    wakeup: str = Field("alarm_one", pattern=WAKEUP_PATTERN)
+    cooking: str = Field("self", pattern=COOKING_PATTERN)
+    guests: str = Field("sometimes", pattern=GUESTS_PATTERN)
 
 
 class ProfileCreate(ProfileBase):
@@ -30,6 +38,13 @@ class ProfileCreate(ProfileBase):
     # повторно — клиент не может сам объявить себя подтверждённым.
     telegram_auth: Optional[Dict[str, Any]] = None
     telegram_init_data: Optional[str] = None
+
+
+class ProfileUpdate(ProfileBase):
+    """Редактирование своей анкеты.
+
+    Пол и подтверждённый Telegram сервер менять не даёт — см. update_profile.
+    """
 
 
 class ProfileOut(ProfileBase):

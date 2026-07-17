@@ -22,6 +22,11 @@ export function initWebApp() {
   try {
     wa.ready();
     wa.expand();
+    // Вертикальный свайп закрывает мини-апп и мешает прокрутке ленты — гасим его.
+    wa.disableVerticalSwipes?.();
+    // Шапка и фон под цвет темы клиента, чтобы не было чужеродной полосы.
+    wa.setHeaderColor?.("bg_color");
+    wa.setBackgroundColor?.("bg_color");
   } catch {
     // Внутри обычного браузера этих методов может не быть — не мешаем работе.
   }

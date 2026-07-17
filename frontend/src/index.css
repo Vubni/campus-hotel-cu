@@ -48,6 +48,25 @@ body {
   letter-spacing: -0.01em;
 }
 
+/* Ничто не должно вылезать за ширину экрана и включать горизонтальную
+   прокрутку — особенно внутри узкого окна Telegram Mini App. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+/* Длинные слова в заголовках переносим, а не растягиваем страницу. */
+.hero__title,
+.gate__title,
+.hero__sub {
+  overflow-wrap: break-word;
+}
+
 .accent {
   color: var(--accent);
 }
@@ -1062,6 +1081,60 @@ a.gmember:hover {
   cursor: default;
 }
 
+/* Удаление анкеты — второстепенное, спокойное действие под основной кнопкой. */
+.modal__delete {
+  background: none;
+  border: none;
+  padding: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  cursor: pointer;
+  align-self: center;
+}
+.modal__delete:hover {
+  color: #e5484d;
+}
+.modal__danger {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #e5484d;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--ink);
+}
+.modal__danger-actions {
+  display: flex;
+  gap: 10px;
+}
+.modal__danger-cancel,
+.modal__danger-confirm {
+  flex: 1;
+  padding: 11px;
+  border-radius: var(--pill);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.modal__danger-cancel {
+  background: var(--surface);
+  color: var(--ink);
+}
+.modal__danger-confirm {
+  background: #e5484d;
+  border-color: #e5484d;
+  color: #fff;
+}
+.modal__danger-cancel:disabled,
+.modal__danger-confirm:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* На тач-экранах hover-эффекты «залипают» после нажатия — отключаем подъём
    и тень, оставляя их только там, где есть настоящая мышь. */
 @media (hover: none) {
@@ -1248,9 +1321,12 @@ a.gmember:hover {
 
   /* Модалка раскрывается на весь экран: форма длинная, так удобнее
      прокручивать сверху вниз, а шапка с крестиком всегда на виду. */
+  /* align-items:flex-start (не stretch): модалка растёт под высоту контента,
+     а не обрезается по высоте экрана — иначе непрозрачный фон не доходит до
+     нижних полей и сквозь них просвечивает лента. */
   .modal__overlay {
     padding: 0;
-    align-items: stretch;
+    align-items: flex-start;
   }
   .modal {
     max-width: none;

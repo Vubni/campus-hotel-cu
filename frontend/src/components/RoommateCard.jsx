@@ -1,4 +1,15 @@
-import { GENDER, SLEEP, SMOKING, TRACK, cleanlinessLabel, roomLabel } from "../labels.js";
+import {
+  COOKING,
+  GENDER,
+  GUESTS,
+  SLEEP,
+  SMOKING,
+  TIDINESS,
+  TRACK,
+  WAKEUP,
+  courseLabel,
+  roomLabel,
+} from "../labels.js";
 
 function initials(name) {
   return name.trim().charAt(0).toUpperCase();
@@ -11,11 +22,15 @@ export default function RoommateCard({ profile }) {
     photo_url,
     telegram,
     track,
+    course,
     bio,
     room_capacity,
     sleep_schedule,
     smoking,
-    cleanliness,
+    tidiness,
+    wakeup,
+    cooking,
+    guests,
     telegram_verified,
   } = profile;
 
@@ -41,14 +56,21 @@ export default function RoommateCard({ profile }) {
           <span className="card__gender">{GENDER[gender]}</span>
         </h3>
 
-        {TRACK[track] && <p className="card__faculty">{TRACK[track]}</p>}
+        <p className="card__faculty">
+          {[TRACK[track], course ? `${course} курс` : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
 
         {bio && <p className="card__bio">{bio}</p>}
 
         <div className="card__tags">
           <span className="tag">{SLEEP[sleep_schedule]}</span>
           <span className="tag">{SMOKING[smoking]}</span>
-          <span className="tag">{cleanlinessLabel(cleanliness)}</span>
+          <span className="tag">{TIDINESS[tidiness]}</span>
+          <span className="tag">{WAKEUP[wakeup]}</span>
+          <span className="tag">{COOKING[cooking]}</span>
+          <span className="tag">{GUESTS[guests]}</span>
         </div>
 
         <a
