@@ -23,7 +23,6 @@ import schemas
 import storage
 import telegram_auth
 from database import Base, engine, get_db, wait_for_db
-from seed import seed_if_empty
 
 app = FastAPI(title="Кампус-отель Диск — поиск соседей", version="1.0.0")
 
@@ -113,7 +112,6 @@ def on_startup():
     wait_for_db()
     Base.metadata.create_all(bind=engine)
     ensure_columns()
-    seed_if_empty()
     config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     # Раздаём загруженные фото. Монтируем после старта, когда папка точно есть.
     app.mount(

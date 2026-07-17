@@ -158,6 +158,8 @@ export default function App() {
 
   const openGroups = groups.filter((g) => g.spots_left > 0);
   const canStartGroup = myProfile && !myProfile.group_id;
+  // Пусто из-за фильтров или тут вообще никого нет — это разные сообщения.
+  const filtersActive = Object.values(filters).some((v) => v !== "");
 
   return (
     <div className="app">
@@ -238,7 +240,9 @@ export default function App() {
             </p>
             {profiles.length === 0 ? (
               <p className="state">
-                Никого не нашлось. Измени фильтры или размести свою анкету.
+                {filtersActive
+                  ? "Под фильтры никто не подошёл. Попробуй смягчить условия."
+                  : "Пока здесь пусто. Размести анкету первым — и тебя увидят."}
               </p>
             ) : (
               <div className="grid">
