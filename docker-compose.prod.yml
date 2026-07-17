@@ -34,7 +34,8 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?задай TELEGRAM_BOT_TOKEN в .env}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?задай TELEGRAM_BOT_USERNAME в .env}
       BOT_SECRET: ${BOT_SECRET:?задай BOT_SECRET в .env}
-      SITE_URL: ${SITE_URL:?задай SITE_URL в .env}
+      # Собирается из DOMAIN, чтобы адрес был задан ровно в одном месте.
+      SITE_URL: https://${DOMAIN:?задай DOMAIN в .env}
     volumes:
       - uploads:/app/uploads
     depends_on:
@@ -49,7 +50,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?}
       BOT_SECRET: ${BOT_SECRET:?}
       API_URL: http://backend:8000
-      SITE_URL: ${SITE_URL:?}
+      SITE_URL: https://${DOMAIN:?}
     depends_on:
       - backend
     restart: unless-stopped
@@ -62,6 +63,9 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    environment:
+      # Подставляется в Caddyfile — на этот домен и выпускается сертификат.
+      DOMAIN: ${DOMAIN:?задай DOMAIN в .env}
     ports:
       - "80:80"
       - "443:443"
