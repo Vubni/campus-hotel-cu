@@ -1,0 +1,62 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: obshaga
+      POSTGRES_PASSWORD: obshaga
+      POSTGRES_DB: obshaga
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obshaga"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      # Хост-порт 5433, чтобы не конфликтовать с другими Postgres на 5432.
+      # Для работы приложения не требуется — только для внешних DB-клиентов.
+      - "5433:5432"
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://obshaga:obshaga@db:5432/obshaga
+      UPLOAD_DIR: /app/uploads
+      # Токен и имя бота из @BotFather. Пусто — вход через Telegram выключен,
+      # загрузка фото файлом работает в любом случае.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      BOT_SECRET: ${BOT_SECRET:-}
+      SITE_URL: ${SITE_URL:-http://localhost:5173}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  # Бот запускается только с профилем: docker compose --profile bot up -d
+  # Без токена ему нечего делать, поэтому он не мешает обычному запуску.
+  bot:
+    build: ./bot
+    profiles: ["bot"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      BOT_SECRET: ${BOT_SECRET:-}
+      API_URL: http://backend:8000
+      SITE_URL: ${SITE_URL:-http://localhost:5173}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  pgdata:
+  uploads:

@@ -1,0 +1,14 @@
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Секреты: токен бота и прочее
+.env
+
+# Misc
+.DS_Store
