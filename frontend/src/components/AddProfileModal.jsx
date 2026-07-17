@@ -37,6 +37,9 @@ const COOKING_CHOICES = [
   ["delivery", "Доставка / кафе"],
 ];
 
+// Лимит на длину «о себе»: чтобы текст всегда помещался в карточку целиком.
+const BIO_MAX = 300;
+
 /** Собираем форму из существующей анкеты (режим редактирования). */
 function formFromProfile(profile) {
   const form = { ...EMPTY_FORM };
@@ -282,8 +285,15 @@ export default function AddProfileModal({
           </label>
 
           <label className="field">
-            <span>О себе</span>
-            <textarea rows={3} value={form.bio} onChange={set("bio")} />
+            <span>
+              О себе <span className="field__count">{form.bio.length}/{BIO_MAX}</span>
+            </span>
+            <textarea
+              rows={3}
+              maxLength={BIO_MAX}
+              value={form.bio}
+              onChange={set("bio")}
+            />
           </label>
 
           <div className="field-row">

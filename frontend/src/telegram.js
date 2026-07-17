@@ -22,11 +22,13 @@ export function initWebApp() {
   try {
     wa.ready();
     wa.expand();
-    // Вертикальный свайп закрывает мини-апп и мешает прокрутке ленты — гасим его.
-    wa.disableVerticalSwipes?.();
-    // Шапка и фон под цвет темы клиента, чтобы не было чужеродной полосы.
-    wa.setHeaderColor?.("bg_color");
-    wa.setBackgroundColor?.("bg_color");
+    // Цвета шапки/фона под тему — только если клиент их поддерживает. На старых
+    // версиях (6.0) эти методы не работают и Telegram сыплет предупреждениями.
+    // Свайп-закрытие НЕ трогаем: его отключение мешало закрывать мини-апп.
+    if (wa.isVersionAtLeast && wa.isVersionAtLeast("6.1")) {
+      wa.setHeaderColor?.("bg_color");
+      wa.setBackgroundColor?.("bg_color");
+    }
   } catch {
     // Внутри обычного браузера этих методов может не быть — не мешаем работе.
   }
