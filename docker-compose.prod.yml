@@ -1,0 +1,80 @@
+# Продакшен-конфиг. Отличия от docker-compose.yml (он для локальной разработки):
+#   * наружу торчит только Caddy (80/443) — он же выдаёт HTTPS-сертификат;
+#   * база и бэкенд портов наружу НЕ имеют, доступны только внутри сети compose;
+#   * пароль базы и секреты берутся из .env, дефолтов нет;
+#   * все сервисы перезапускаются сами.
+#
+# Запуск:
+#   docker compose -p obshaga -f docker-compose.prod.yml --profile bot up -d --build
+#
+# Это отдельный файл, а не оверлей: в compose списки портов при слиянии
+# складываются, поэтому «спрятать» порты из базового файла оверлеем нельзя.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: obshaga
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задай POSTGRES_PASSWORD в .env}
+      POSTGRES_DB: obshaga
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obshaga"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://obshaga:${POSTGRES_PASSWORD}@db:5432/obshaga
+      UPLOAD_DIR: /app/uploads
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?задай TELEGRAM_BOT_TOKEN в .env}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?задай TELEGRAM_BOT_USERNAME в .env}
+      BOT_SECRET: ${BOT_SECRET:?задай BOT_SECRET в .env}
+      SITE_URL: ${SITE_URL:?задай SITE_URL в .env}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bot:
+    build: ./bot
+    profiles: ["bot"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?}
+      BOT_SECRET: ${BOT_SECRET:?}
+      API_URL: http://backend:8000
+      SITE_URL: ${SITE_URL:?}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # тут лежат сертификаты, том обязателен
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:
