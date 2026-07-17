@@ -20,6 +20,11 @@ BOT_SECRET = os.getenv("BOT_SECRET", "").strip()
 # Адрес сайта — подставляем в ссылки внутри сообщений бота.
 SITE_URL = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
 
+# Прокси до api.telegram.org и CDN Telegram — нужен там, где Telegram
+# заблокирован. Формат: http://user:pass@host:port или socks5://user:pass@host:port.
+# Пусто — ходим напрямую. Тот же прокси используется ботом.
+TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL", "").strip() or None
+
 
 def telegram_enabled() -> bool:
     return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME)

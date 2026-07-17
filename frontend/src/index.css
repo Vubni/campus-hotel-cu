@@ -249,6 +249,12 @@ body {
   background: var(--accent);
   color: #fff;
 }
+/* На узких экранах CTA сжимается: сначала до «+ Анкета», на самых узких —
+   до одного «+», чтобы освободить место названию в шапке. */
+.header__cta-short,
+.header__cta-icon {
+  display: none;
+}
 
 /* Container */
 .container {
@@ -1056,14 +1062,193 @@ a.gmember:hover {
   cursor: default;
 }
 
-@media (max-width: 560px) {
+/* На тач-экранах hover-эффекты «залипают» после нажатия — отключаем подъём
+   и тень, оставляя их только там, где есть настоящая мышь. */
+@media (hover: none) {
+  .card:hover,
+  .gate__option:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--border);
+  }
+}
+
+/* ===== Планшеты и телефоны ===== */
+@media (max-width: 720px) {
+  .gate {
+    padding: 20px max(20px, env(safe-area-inset-left)) max(20px, env(safe-area-inset-bottom));
+  }
+  .gate__brand {
+    margin-bottom: 28px;
+  }
+  .gate__subtitle {
+    margin-bottom: 32px;
+  }
   .gate__options {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .gate__option {
+    padding: 24px 20px;
+    gap: 6px;
+  }
+  .gate__emoji {
+    font-size: 44px;
+  }
+
+  .header__inner {
+    padding: 12px max(16px, env(safe-area-inset-left)) 12px
+      max(16px, env(safe-area-inset-right));
+    gap: 8px;
+  }
+  .header__brand {
+    gap: 9px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .header__brand > div {
+    min-width: 0;
   }
   .header__brand p {
     display: none;
   }
+  .header__logo {
+    font-size: 26px;
+  }
+  .header__brand h1 {
+    font-size: 16px;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .header__right {
+    gap: 7px;
+    flex-shrink: 0;
+  }
+  .header__gender {
+    padding: 9px 12px;
+  }
+  .header__gender-change {
+    display: none;
+  }
+  .header__cta {
+    padding: 10px 16px;
+  }
+  .header__cta-full {
+    display: none;
+  }
+  .header__cta-short {
+    display: inline;
+  }
+
+  .container {
+    padding: 20px max(16px, env(safe-area-inset-left))
+      calc(40px + env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-right));
+  }
+  .hero {
+    margin-bottom: 20px;
+  }
+  .hero__sub {
+    margin-top: 8px;
+    font-size: 15px;
+  }
+
+  .tabs {
+    gap: 6px;
+  }
+  .tabs__btn {
+    flex: 1;
+    justify-content: center;
+    padding: 11px 10px;
+  }
+
+  .filters {
+    gap: 8px;
+  }
+  .filters__search {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .filters select {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+  .filters__reset {
+    flex: 1 1 100%;
+  }
+
+  .grid,
+  .grid--groups {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .groups__new {
+    flex-wrap: wrap;
+  }
+
+  /* Поля не мельче 16px — иначе iOS Safari зумит страницу при фокусе. */
+  .filters input,
+  .filters select,
+  .field input,
+  .field select,
+  .field textarea {
+    font-size: 16px;
+  }
+
+  /* Модалка раскрывается на весь экран: форма длинная, так удобнее
+     прокручивать сверху вниз, а шапка с крестиком всегда на виду. */
+  .modal__overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+  .modal {
+    max-width: none;
+    margin: 0;
+    border-radius: 0;
+    min-height: 100%;
+  }
+  .modal__head {
+    padding: max(16px, env(safe-area-inset-top)) 18px 16px;
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+  .modal__form {
+    padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .footer {
+    padding: 24px 20px calc(24px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ===== Узкие телефоны ===== */
+@media (max-width: 400px) {
+  .header__gender {
+    display: none;
+  }
+  .header__cta-short {
+    display: none;
+  }
+  .header__cta-icon {
+    display: inline;
+    font-size: 20px;
+    line-height: 1;
+  }
+  .header__cta {
+    padding: 9px 15px;
+  }
+  .hero__title {
+    font-size: 27px;
+  }
   .field-row {
     flex-wrap: wrap;
+  }
+  .field--sm {
+    max-width: none;
   }
 }

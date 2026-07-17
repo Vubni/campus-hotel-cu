@@ -36,6 +36,8 @@ services:
       BOT_SECRET: ${BOT_SECRET:?задай BOT_SECRET в .env}
       # Собирается из DOMAIN, чтобы адрес был задан ровно в одном месте.
       SITE_URL: https://${DOMAIN:?задай DOMAIN в .env}
+      # Прокси до Telegram (уведомления, аватарки). Пусто — напрямую.
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
     volumes:
       - uploads:/app/uploads
     depends_on:
@@ -51,6 +53,8 @@ services:
       BOT_SECRET: ${BOT_SECRET:?}
       API_URL: http://backend:8000
       SITE_URL: https://${DOMAIN:?}
+      # Прокси до api.telegram.org для long polling. Пусто — напрямую.
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
     depends_on:
       - backend
     restart: unless-stopped

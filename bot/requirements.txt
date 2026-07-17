@@ -1,2 +1,4 @@
 aiogram==3.17.0
+# Прокси-коннектор для aiogram: поддерживает http/socks5 через TELEGRAM_PROXY_URL.
+aiohttp-socks==0.10.1
 httpx==0.28.1

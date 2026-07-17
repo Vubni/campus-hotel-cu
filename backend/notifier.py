@@ -9,7 +9,7 @@ from typing import Optional
 
 import httpx
 
-from config import TELEGRAM_BOT_TOKEN
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_PROXY_URL
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ async def send_message(
         payload["reply_markup"] = reply_markup
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, proxy=TELEGRAM_PROXY_URL) as client:
             resp = await client.post(
                 API.format(token=TELEGRAM_BOT_TOKEN, method="sendMessage"),
                 json=payload,

@@ -7,7 +7,12 @@ from urllib.parse import parse_qsl
 
 import httpx
 
-from config import AUTH_MAX_AGE_SECONDS, MAX_UPLOAD_BYTES, TELEGRAM_BOT_TOKEN
+from config import (
+    AUTH_MAX_AGE_SECONDS,
+    MAX_UPLOAD_BYTES,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_PROXY_URL,
+)
 
 
 class TelegramAuthError(Exception):
@@ -98,7 +103,9 @@ async def download_avatar(url: str) -> Optional[bytes]:
     Ссылки t.me/i/userpic/... живут недолго, поэтому картинку сохраняем у себя.
     """
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=10, follow_redirects=True, proxy=TELEGRAM_PROXY_URL
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             if len(resp.content) > MAX_UPLOAD_BYTES:

@@ -15,6 +15,7 @@ import os
 import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -26,6 +27,10 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 API_URL = os.getenv("API_URL", "http://backend:8000").rstrip("/")
 BOT_SECRET = os.getenv("BOT_SECRET", "").strip()
 SITE_URL = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
+# Прокси до api.telegram.org — нужен там, где Telegram заблокирован.
+# Формат: http://user:pass@host:port или socks5://user:pass@host:port.
+# Пусто — ходим напрямую.
+TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL", "").strip()
 
 dp = Dispatcher()
 
@@ -160,7 +165,15 @@ async def main():
         raise SystemExit("Нет BOT_SECRET — бэкенд не пустит бота в служебные ручки")
 
     # Сообщения размечены HTML-тегами — задаём parse_mode по умолчанию.
-    bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Прокси (если задан) заворачивает все запросы к Telegram, включая polling.
+    session = AiohttpSession(proxy=TELEGRAM_PROXY_URL) if TELEGRAM_PROXY_URL else None
+    if TELEGRAM_PROXY_URL:
+        log.info("Хожу в Telegram через прокси")
+    bot = Bot(
+        token=TOKEN,
+        session=session,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     # На всякий случай снимаем вебхук: мы работаем на long polling.
     await bot.delete_webhook(drop_pending_updates=False)
     log.info("Бот запущен, слушаю обновления")

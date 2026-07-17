@@ -183,8 +183,13 @@ export default function App() {
               {GENDER_WORD[gender]}
               <span className="header__gender-change">сменить</span>
             </button>
-            <button className="header__cta" onClick={() => setShowModal(true)}>
-              Разместить анкету
+            <button
+              className="header__cta"
+              onClick={() => setShowModal(true)}
+            >
+              <span className="header__cta-full">Разместить анкету</span>
+              <span className="header__cta-short">+ Анкета</span>
+              <span className="header__cta-icon" aria-hidden="true">+</span>
             </button>
           </div>
         </div>
