@@ -78,8 +78,9 @@ class Profile(Base):
     tidiness = Column(String(20), nullable=False, default="medium")
     # Подъём утром: alarm_one (1 будильник) | alarm_many (10 будильников) | natural (само)
     wakeup = Column(String(20), nullable=False, default="alarm_one")
-    # Готовка: self (сам) | together (вместе) | delivery (доставка/рестораны)
-    cooking = Column(String(20), nullable=False, default="self")
+    # Готовка: можно выбрать несколько из self | together | delivery.
+    # Храним как список значений через запятую ("self,together").
+    cooking = Column(String(60), nullable=False, default="self")
     # Гости: often (часто) | sometimes (иногда) | never (не зову)
     guests = Column(String(20), nullable=False, default="sometimes")
 

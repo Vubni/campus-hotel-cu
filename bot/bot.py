@@ -64,8 +64,9 @@ async def cmd_start(message: Message):
     if not data.get("linked"):
         await message.answer(
             "👋 Привет! Я бот <b>Кампус-отель Диск</b>.\n\n"
-            "Не нашёл твою анкету. Размести её на сайте — укажи там свой ник "
-            f"@{user.username or '…'} — и снова нажми /start.\n\n{SITE_URL}"
+            "Не нашёл твою анкету. Открой приложение кнопкой снизу — рядом с "
+            "полем ввода — и размести анкету. Укажи там свой ник "
+            f"@{user.username or '…'} и снова нажми /start."
         )
         return
 

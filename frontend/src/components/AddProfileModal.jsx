@@ -27,9 +27,15 @@ const EMPTY_FORM = {
   smoking: "no",
   tidiness: "medium",
   wakeup: "alarm_one",
-  cooking: "self",
+  cooking: ["self"], // можно выбрать несколько
   guests: "sometimes",
 };
+
+const COOKING_CHOICES = [
+  ["self", "Сам"],
+  ["together", "Вместе"],
+  ["delivery", "Доставка / кафе"],
+];
 
 /** Собираем форму из существующей анкеты (режим редактирования). */
 function formFromProfile(profile) {
@@ -41,6 +47,11 @@ function formFromProfile(profile) {
   }
   // NULL на сервере = «не предпочтительно» — в селекте это пустая строка.
   form.room_capacity = profile.room_capacity ?? "";
+  // Готовка — всегда массив (на случай старых строковых данных).
+  form.cooking = Array.isArray(profile.cooking)
+    ? profile.cooking
+    : [profile.cooking].filter(Boolean);
+  if (form.cooking.length === 0) form.cooking = ["self"];
   return form;
 }
 
@@ -72,6 +83,18 @@ export default function AddProfileModal({
   const [deleting, setDeleting] = useState(false);
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+
+  // Готовка — множественный выбор: тумблим значение, но не даём убрать последнее.
+  function toggleCooking(value) {
+    setForm((prev) => {
+      const has = prev.cooking.includes(value);
+      if (has && prev.cooking.length === 1) return prev;
+      const next = has
+        ? prev.cooking.filter((c) => c !== value)
+        : [...prev.cooking, value];
+      return { ...prev, cooking: next };
+    });
+  }
 
   useEffect(() => {
     fetchConfig().then(setConfig).catch(() => setConfig(null));
@@ -312,23 +335,33 @@ export default function AddProfileModal({
               </select>
             </label>
             <label className="field">
-              <span>Готовка</span>
-              <select value={form.cooking} onChange={set("cooking")}>
-                <option value="self">Готовлю сам</option>
-                <option value="together">Готовим вместе</option>
-                <option value="delivery">Доставка и кафе</option>
+              <span>Гости</span>
+              <select value={form.guests} onChange={set("guests")}>
+                <option value="often">Часто зову гостей</option>
+                <option value="sometimes">Иногда</option>
+                <option value="never">Не зову</option>
               </select>
             </label>
           </div>
 
-          <label className="field">
-            <span>Гости</span>
-            <select value={form.guests} onChange={set("guests")}>
-              <option value="often">Часто зову гостей</option>
-              <option value="sometimes">Иногда</option>
-              <option value="never">Не зову</option>
-            </select>
-          </label>
+          <div className="field">
+            <span>Готовка (можно выбрать несколько)</span>
+            <div className="multi">
+              {COOKING_CHOICES.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`multi__btn${
+                    form.cooking.includes(value) ? " multi__btn--on" : ""
+                  }`}
+                  onClick={() => toggleCooking(value)}
+                  aria-pressed={form.cooking.includes(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {error && <p className="modal__error">{error}</p>}
 

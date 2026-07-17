@@ -402,6 +402,10 @@ body {
   font-weight: 800;
   color: var(--accent);
 }
+/* На десктопе комната — плашка поверх большого фото; тег в теле прячем. */
+.tag--room {
+  display: none;
+}
 .card__room {
   position: absolute;
   bottom: 12px;
@@ -776,6 +780,61 @@ a.gmember:hover {
   white-space: nowrap;
 }
 
+/* ===== Раскрытие участника компании ===== */
+.gmember-box {
+  border-radius: var(--radius-sm);
+}
+.gmember-box--open {
+  background: var(--bg);
+}
+.gmember--toggle {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.gmember--toggle:hover {
+  background: var(--bg);
+}
+.gmember-box--open .gmember--toggle:hover {
+  background: none;
+}
+.gmember__chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.gmember__details {
+  padding: 2px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gmember__bio {
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+.gmember__details .card__tags {
+  margin-top: 0;
+}
+.gmember__tg {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+}
+.gmember__tg:hover {
+  text-decoration: underline;
+}
+
 .gcard__join,
 .gcard__leave {
   border: none;
@@ -1010,6 +1069,34 @@ a.gmember:hover {
   color: var(--accent);
 }
 .rating__btn--on {
+  background: var(--solid-bg);
+  border-color: var(--solid-bg);
+  color: var(--solid-text);
+}
+
+/* ===== Множественный выбор (готовка) ===== */
+.multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.multi__btn {
+  flex: 1 1 auto;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.multi__btn:hover:not(.multi__btn--on) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.multi__btn--on {
   background: var(--solid-bg);
   border-color: var(--solid-bg);
   color: var(--solid-text);
@@ -1258,30 +1345,37 @@ a.gmember:hover {
     gap: 14px;
   }
 
-  /* Карточки соседей — горизонтальные: фото слева, текст справа. Иначе
-     в один столбец квадратное фото растягивает карточку на весь экран. */
+  /* Карточки соседей — горизонтальные: квадратное фото слева, текст справа.
+     align-items:flex-start (не stretch) — иначе фото растягивается по высоте
+     карточки в прямоугольник. aspect-ratio:1/1 держит его квадратным. */
   .card {
     flex-direction: row;
-    align-items: stretch;
+    align-items: flex-start;
+    padding: 12px;
+    gap: 12px;
   }
   .card__photo {
     width: 34%;
-    min-width: 108px;
-    max-width: 132px;
-    aspect-ratio: auto;
+    min-width: 104px;
+    max-width: 120px;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
     flex-shrink: 0;
   }
   .card__placeholder {
     font-size: 40px;
   }
+  /* На телефоне фото маленькое — плашку с фото убираем, комнату показываем
+     тегом в теле карточки рядом с остальными. */
   .card__room {
-    bottom: 8px;
-    left: 8px;
-    padding: 5px 9px;
-    font-size: 10px;
+    display: none;
+  }
+  .tag--room {
+    display: inline;
   }
   .card__body {
-    padding: 13px 14px;
+    padding: 0;
     gap: 6px;
   }
   .card__name {

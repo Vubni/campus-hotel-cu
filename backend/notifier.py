@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 
@@ -14,6 +14,17 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_PROXY_URL
 log = logging.getLogger(__name__)
 
 API = "https://api.telegram.org/bot{token}/{method}"
+
+
+async def deliver(messages: List[dict]) -> None:
+    """Отправляет пачку сообщений. Запускается в фоне (BackgroundTasks), уже
+    после того как ответ ушёл клиенту — поэтому сетевые задержки Telegram не
+    тормозят действия на сайте. Каждое сообщение — dict с chat_id/text/markup.
+    """
+    for msg in messages:
+        await send_message(
+            msg["chat_id"], msg["text"], msg.get("reply_markup")
+        )
 
 
 async def send_message(

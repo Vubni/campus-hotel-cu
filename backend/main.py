@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import (
+    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -129,6 +130,10 @@ def ensure_columns() -> None:
                     f"VARCHAR(20) NOT NULL DEFAULT '{default}'"
                 )
             )
+        # Готовка теперь допускает несколько значений через запятую — нужна ширина.
+        conn.execute(
+            text("ALTER TABLE profiles ALTER COLUMN cooking TYPE VARCHAR(60)")
+        )
 
         # Чистоплотность (1..5) → аккуратность (relaxed | medium | neat).
         conn.execute(
@@ -322,6 +327,9 @@ def create_profile(payload: schemas.ProfileCreate, db: Session = Depends(get_db)
         if verified_user.get("username"):
             data["telegram"] = str(verified_user["username"]).lstrip("@")
 
+    # Готовка приходит списком, а в колонке лежит строкой через запятую.
+    data["cooking"] = ",".join(data["cooking"])
+
     profile = models.Profile(**data)
     db.add(profile)
     db.commit()
@@ -351,6 +359,9 @@ def update_profile(
     else:
         data["telegram"] = payload.telegram.lstrip("@").strip()
 
+    # Готовка — список значений, храним строкой через запятую.
+    data["cooking"] = ",".join(data["cooking"])
+
     for key, value in data.items():
         setattr(profile, key, value)
     db.commit()
@@ -359,7 +370,11 @@ def update_profile(
 
 
 @app.delete("/api/profiles/{profile_id}", status_code=204)
-async def delete_profile(profile_id: int, db: Session = Depends(get_db)):
+def delete_profile(
+    profile_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Удаление своей анкеты: заодно выводим из компании и чистим заявки."""
     profile = _get_profile_or_404(db, profile_id)
 
@@ -387,20 +402,26 @@ async def delete_profile(profile_id: int, db: Session = Depends(get_db)):
                 if new_status != join_flow.PENDING:
                     decided.append((req, new_status))
 
+    # Сообщения собираем ДО удаления, пока объекты ещё в сессии.
+    msgs: List[dict] = []
+    for member in leftovers:
+        if member.telegram_chat_id:
+            msgs.append(
+                _msg(
+                    member.telegram_chat_id,
+                    f"🚪 <b>{left_name}</b> удалил(а) анкету и вышел(а) из комнаты.\n"
+                    f"Свободных мест стало больше: {config.SITE_URL}",
+                )
+            )
+    for req, status in decided:
+        msgs += _decision_msgs(req, status)
+
     db.delete(profile)
     if group and not group.members:
         db.delete(group)
     db.commit()
 
-    for member in leftovers:
-        if member.telegram_chat_id:
-            await notifier.send_message(
-                member.telegram_chat_id,
-                f"🚪 <b>{left_name}</b> удалил(а) анкету и вышел(а) из комнаты.\n"
-                f"Свободных мест стало больше: {config.SITE_URL}",
-            )
-    for req, status in decided:
-        await _notify_decision(req, status)
+    background_tasks.add_task(notifier.deliver, msgs)
     return None
 
 
@@ -443,51 +464,67 @@ def _who(profile: models.Profile) -> str:
     return f"{profile.name} · {label}" if label else profile.name
 
 
-async def _notify_members_about_request(req: models.JoinRequest) -> None:
+def _msg(chat_id: Optional[int], text: str, reply_markup: Optional[dict] = None):
+    """Один пункт для фоновой рассылки; без chat_id (не нажали /start) — пропуск."""
+    return {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
+
+
+def _request_msgs(req: models.JoinRequest) -> List[dict]:
     """Заявка ушла — зовём подтвердить всех, кто в комнате."""
     who = _who(req.profile)
     needed = join_flow.votes_needed(req)
+    msgs = []
     for member in req.group.members:
-        if not member.telegram_chat_id:
-            continue
-        await notifier.send_message(
-            member.telegram_chat_id,
-            f"🔔 <b>{who}</b> просится к вам в комнату на {req.group.capacity}.\n"
-            f"@{req.profile.telegram}\n\n"
-            f"Нужно согласие всех участников ({needed}).",
-            reply_markup=notifier.vote_keyboard(req.id),
-        )
+        if member.telegram_chat_id:
+            msgs.append(
+                _msg(
+                    member.telegram_chat_id,
+                    f"🔔 <b>{who}</b> просится к вам в комнату на {req.group.capacity}.\n"
+                    f"@{req.profile.telegram}\n\n"
+                    f"Нужно согласие всех участников ({needed}).",
+                    notifier.vote_keyboard(req.id),
+                )
+            )
+    return msgs
 
 
-async def _notify_decision(req: models.JoinRequest, status: str) -> None:
-    """Сообщаем автору заявки итог."""
+def _decision_msgs(req: models.JoinRequest, status: str) -> List[dict]:
+    """Сообщаем автору заявки итог (приняли / отклонили / компания распалась)."""
     profile = req.profile
     if not profile.telegram_chat_id:
-        return
+        return []
     if status == join_flow.APPROVED:
         mates = ", ".join(m.name for m in req.group.members if m.id != profile.id)
-        await notifier.send_message(
-            profile.telegram_chat_id,
-            f"🎉 Тебя приняли в комнату на {req.group.capacity}!\n"
-            f"Соседи: {mates or '—'}\n\n{config.SITE_URL}",
-        )
-    elif status == join_flow.REJECTED:
-        await notifier.send_message(
-            profile.telegram_chat_id,
-            "😔 Заявку в комнату отклонили. Не расстраивайся — "
-            f"есть другие варианты: {config.SITE_URL}",
-        )
-    elif status == join_flow.CANCELLED:
-        await notifier.send_message(
-            profile.telegram_chat_id,
-            "ℹ️ Заявка отменена: компания распалась.",
-        )
+        return [
+            _msg(
+                profile.telegram_chat_id,
+                f"🎉 Тебя приняли в комнату на {req.group.capacity}!\n"
+                f"Соседи: {mates or '—'}\n\n{config.SITE_URL}",
+            )
+        ]
+    if status == join_flow.REJECTED:
+        return [
+            _msg(
+                profile.telegram_chat_id,
+                "😔 Заявку в комнату отклонили. Не расстраивайся — "
+                f"есть другие варианты: {config.SITE_URL}",
+            )
+        ]
+    if status == join_flow.CANCELLED:
+        return [
+            _msg(profile.telegram_chat_id, "ℹ️ Заявка отменена: компания распалась.")
+        ]
+    return []
 
 
-async def _apply_vote(
+def _apply_vote(
     db: Session, req: models.JoinRequest, voter: models.Profile, approve: bool
-) -> str:
-    """Записывает голос, пересчитывает статус и рассылает уведомления."""
+) -> tuple[str, List[dict]]:
+    """Записывает голос, пересчитывает статус и СОБИРАЕТ уведомления.
+
+    Сами сообщения не шлёт — возвращает их, чтобы вызывающий отправил в фоне
+    (BackgroundTasks) уже после ответа клиенту.
+    """
     vote = (
         db.query(models.JoinRequestVote)
         .filter(
@@ -514,19 +551,22 @@ async def _apply_vote(
     db.commit()
     db.refresh(req)
 
+    msgs: List[dict] = []
     if status != join_flow.PENDING:
-        await _notify_decision(req, status)
+        msgs += _decision_msgs(req, status)
     if status == join_flow.APPROVED:
         # Остальным в комнате — что состав пополнился.
         for member in req.group.members:
             if member.id != req.profile_id and member.telegram_chat_id:
-                await notifier.send_message(
-                    member.telegram_chat_id,
-                    f"✅ <b>{req.profile.name}</b> теперь в вашей комнате.",
+                msgs.append(
+                    _msg(
+                        member.telegram_chat_id,
+                        f"✅ <b>{req.profile.name}</b> теперь в вашей комнате.",
+                    )
                 )
         for other in also_rejected:
-            await _notify_decision(other, join_flow.REJECTED)
-    return status
+            msgs += _decision_msgs(other, join_flow.REJECTED)
+    return status, msgs
 
 
 @app.get("/api/groups", response_model=List[schemas.GroupOut])
@@ -613,8 +653,11 @@ def list_my_requests(
     response_model=schemas.JoinRequestOut,
     status_code=201,
 )
-async def create_join_request(
-    group_id: int, payload: schemas.JoinRequestCreate, db: Session = Depends(get_db)
+def create_join_request(
+    group_id: int,
+    payload: schemas.JoinRequestCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     """Заявка на вступление. Сама по себе в комнату не пускает."""
     group = _get_group_or_404(db, group_id)
@@ -648,13 +691,16 @@ async def create_join_request(
     db.commit()
     db.refresh(req)
 
-    await _notify_members_about_request(req)
+    background_tasks.add_task(notifier.deliver, _request_msgs(req))
     return _request_out(req)
 
 
 @app.post("/api/requests/{request_id}/vote", response_model=schemas.JoinRequestOut)
-async def vote_request(
-    request_id: int, payload: schemas.JoinRequestVoteIn, db: Session = Depends(get_db)
+def vote_request(
+    request_id: int,
+    payload: schemas.JoinRequestVoteIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     req = _get_request_or_404(db, request_id)
     voter = _get_profile_or_404(db, payload.profile_id)
@@ -666,7 +712,8 @@ async def vote_request(
             status_code=403, detail="Голосовать могут только те, кто в комнате"
         )
 
-    status = await _apply_vote(db, req, voter, payload.approve)
+    _status, msgs = _apply_vote(db, req, voter, payload.approve)
+    background_tasks.add_task(notifier.deliver, msgs)
     db.refresh(req)
     return _request_out(req)
 
@@ -687,8 +734,11 @@ def cancel_request(
 
 
 @app.post("/api/groups/{group_id}/leave", status_code=204)
-async def leave_group(
-    group_id: int, payload: schemas.GroupMembership, db: Session = Depends(get_db)
+def leave_group(
+    group_id: int,
+    payload: schemas.GroupMembership,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     group = _get_group_or_404(db, group_id)
     profile = _get_profile_or_404(db, payload.profile_id)
@@ -710,20 +760,26 @@ async def leave_group(
             if new_status != join_flow.PENDING:
                 decided.append((req, new_status))
 
+    # Сообщения собираем до коммита, пока объекты в сессии.
+    msgs: List[dict] = []
+    for member in leftovers:
+        if member.telegram_chat_id:
+            msgs.append(
+                _msg(
+                    member.telegram_chat_id,
+                    f"🚪 <b>{left_name}</b> вышел(а) из вашей комнаты.\n"
+                    f"Свободных мест стало больше: {config.SITE_URL}",
+                )
+            )
+    for req, status in decided:
+        msgs += _decision_msgs(req, status)
+
     # Пустая компания никому не нужна — удаляем.
     if not group.members:
         db.delete(group)
     db.commit()
 
-    for member in leftovers:
-        if member.telegram_chat_id:
-            await notifier.send_message(
-                member.telegram_chat_id,
-                f"🚪 <b>{left_name}</b> вышел(а) из вашей комнаты.\n"
-                f"Свободных мест стало больше: {config.SITE_URL}",
-            )
-    for req, status in decided:
-        await _notify_decision(req, status)
+    background_tasks.add_task(notifier.deliver, msgs)
     return None
 
 
@@ -816,7 +872,11 @@ def bot_pending(telegram_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/bot/vote", dependencies=[Depends(_check_bot_secret)])
-async def bot_vote(payload: schemas.BotVote, db: Session = Depends(get_db)):
+def bot_vote(
+    payload: schemas.BotVote,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Голос кнопкой в боте."""
     profile = _find_profile_by_telegram(db, payload.telegram_id, None)
     if not profile:
@@ -830,7 +890,8 @@ async def bot_vote(payload: schemas.BotVote, db: Session = Depends(get_db)):
             status_code=403, detail="Голосовать могут только те, кто в комнате"
         )
 
-    status = await _apply_vote(db, req, profile, payload.approve)
+    status, msgs = _apply_vote(db, req, profile, payload.approve)
+    background_tasks.add_task(notifier.deliver, msgs)
     db.refresh(req)
     return {
         "status": status,

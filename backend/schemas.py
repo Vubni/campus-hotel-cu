@@ -1,15 +1,37 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 TRACK_PATTERN = "^(dev|business|design|ai|undecided)$"
 SMOKING_PATTERN = "^(yes|no|vape)$"
 TIDINESS_PATTERN = "^(relaxed|medium|neat)$"
 WAKEUP_PATTERN = "^(alarm_one|alarm_many|natural)$"
-COOKING_PATTERN = "^(self|together|delivery)$"
 GUESTS_PATTERN = "^(often|sometimes|never)$"
+
+COOKING_VALUES = ("self", "together", "delivery")
+
+
+def normalize_cooking(value) -> List[str]:
+    """Готовка допускает несколько вариантов. Принимаем список или строку
+    через запятую (как хранится в БД), чистим от мусора и дублей.
+    Пустой выбор недопустим — тогда возвращаем ['self'].
+    """
+    if value is None:
+        items = []
+    elif isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        items = list(value)
+    else:
+        items = []
+    result: List[str] = []
+    for item in items:
+        key = str(item).strip()
+        if key in COOKING_VALUES and key not in result:
+            result.append(key)
+    return result or ["self"]
 
 
 class ProfileBase(BaseModel):
@@ -29,8 +51,14 @@ class ProfileBase(BaseModel):
     smoking: str = Field("no", pattern=SMOKING_PATTERN)
     tidiness: str = Field("medium", pattern=TIDINESS_PATTERN)
     wakeup: str = Field("alarm_one", pattern=WAKEUP_PATTERN)
-    cooking: str = Field("self", pattern=COOKING_PATTERN)
+    # Несколько вариантов готовки; хранится строкой через запятую, наружу — список.
+    cooking: List[str] = Field(default_factory=lambda: ["self"])
     guests: str = Field("sometimes", pattern=GUESTS_PATTERN)
+
+    @field_validator("cooking", mode="before")
+    @classmethod
+    def _validate_cooking(cls, value):
+        return normalize_cooking(value)
 
 
 class ProfileCreate(ProfileBase):
@@ -59,7 +87,11 @@ class ProfileOut(ProfileBase):
 
 
 class GroupMemberOut(BaseModel):
-    """Краткая карточка участника компании."""
+    """Карточка участника компании.
+
+    Помимо краткой части несёт бытовые поля — чтобы в разделе «Компании» можно
+    было раскрыть участника и решить, стоит ли к нему проситься.
+    """
 
     id: int
     name: str
@@ -67,6 +99,21 @@ class GroupMemberOut(BaseModel):
     telegram: str
     track: str = "undecided"
     telegram_verified: bool = False
+
+    course: int = 1
+    bio: str = ""
+    room_capacity: Optional[int] = None
+    sleep_schedule: str = "any"
+    smoking: str = "no"
+    tidiness: str = "medium"
+    wakeup: str = "alarm_one"
+    cooking: List[str] = Field(default_factory=lambda: ["self"])
+    guests: str = "sometimes"
+
+    @field_validator("cooking", mode="before")
+    @classmethod
+    def _validate_cooking(cls, value):
+        return normalize_cooking(value)
 
     class Config:
         from_attributes = True

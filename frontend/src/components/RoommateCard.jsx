@@ -1,15 +1,5 @@
-import {
-  COOKING,
-  GENDER,
-  GUESTS,
-  SLEEP,
-  SMOKING,
-  TIDINESS,
-  TRACK,
-  WAKEUP,
-  courseLabel,
-  roomLabel,
-} from "../labels.js";
+import { GENDER, TRACK, roomLabel } from "../labels.js";
+import LifestyleTags from "./LifestyleTags.jsx";
 
 function initials(name) {
   return name.trim().charAt(0).toUpperCase();
@@ -25,12 +15,6 @@ export default function RoommateCard({ profile }) {
     course,
     bio,
     room_capacity,
-    sleep_schedule,
-    smoking,
-    tidiness,
-    wakeup,
-    cooking,
-    guests,
     telegram_verified,
   } = profile;
 
@@ -65,12 +49,10 @@ export default function RoommateCard({ profile }) {
         {bio && <p className="card__bio">{bio}</p>}
 
         <div className="card__tags">
-          <span className="tag">{SLEEP[sleep_schedule]}</span>
-          <span className="tag">{SMOKING[smoking]}</span>
-          <span className="tag">{TIDINESS[tidiness]}</span>
-          <span className="tag">{WAKEUP[wakeup]}</span>
-          <span className="tag">{COOKING[cooking]}</span>
-          <span className="tag">{GUESTS[guests]}</span>
+          {/* Комната показывается плашкой на фото (десктоп) либо тегом (телефон,
+              где фото маленькое и плашка на нём не помещается) — CSS переключает. */}
+          <span className="tag tag--room">{roomLabel(room_capacity)}</span>
+          <LifestyleTags profile={profile} />
         </div>
 
         <a

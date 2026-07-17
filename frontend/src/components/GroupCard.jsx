@@ -1,4 +1,6 @@
-import { TRACK } from "../labels.js";
+import { useState } from "react";
+import { TRACK, roomLabel } from "../labels.js";
+import LifestyleTags from "./LifestyleTags.jsx";
 
 const SPOTS_WORD = (n) => (n === 1 ? "место" : n < 5 ? "места" : "мест");
 
@@ -16,25 +18,52 @@ function Avatar({ person, className = "" }) {
 }
 
 function Member({ member }) {
+  // Раскрытие: даже если человек уже в компании, можно посмотреть его анкету
+  // и решить, стоит ли к нему проситься.
+  const [open, setOpen] = useState(false);
+  const meta = [TRACK[member.track], member.course ? `${member.course} курс` : null]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <a
-      className="gmember"
-      href={`https://t.me/${member.telegram}`}
-      target="_blank"
-      rel="noreferrer"
-      title={`Написать ${member.name} в Telegram`}
-    >
-      <Avatar person={member} />
-      <span className="gmember__info">
-        <span className="gmember__name">
-          {member.name}
-          {member.telegram_verified && <span className="card__verified">✓</span>}
+    <div className={`gmember-box${open ? " gmember-box--open" : ""}`}>
+      <button
+        type="button"
+        className="gmember gmember--toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Avatar person={member} />
+        <span className="gmember__info">
+          <span className="gmember__name">
+            {member.name}
+            {member.telegram_verified && <span className="card__verified">✓</span>}
+          </span>
+          <span className="gmember__meta">{meta || `@${member.telegram}`}</span>
         </span>
-        <span className="gmember__meta">
-          {TRACK[member.track] || `@${member.telegram}`}
+        <span className="gmember__chevron" aria-hidden="true">
+          {open ? "Скрыть ▲" : "Подробнее ▼"}
         </span>
-      </span>
-    </a>
+      </button>
+
+      {open && (
+        <div className="gmember__details">
+          {member.bio && <p className="gmember__bio">{member.bio}</p>}
+          <div className="card__tags">
+            <span className="tag">{roomLabel(member.room_capacity)}</span>
+            <LifestyleTags profile={member} />
+          </div>
+          <a
+            className="gmember__tg"
+            href={`https://t.me/${member.telegram}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Написать в Telegram
+          </a>
+        </div>
+      )}
+    </div>
   );
 }
 
