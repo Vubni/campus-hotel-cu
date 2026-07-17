@@ -1182,7 +1182,55 @@ a.gmember:hover {
   .grid,
   .grid--groups {
     grid-template-columns: 1fr;
-    gap: 16px;
+    gap: 14px;
+  }
+
+  /* Карточки соседей — горизонтальные: фото слева, текст справа. Иначе
+     в один столбец квадратное фото растягивает карточку на весь экран. */
+  .card {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .card__photo {
+    width: 34%;
+    min-width: 108px;
+    max-width: 132px;
+    aspect-ratio: auto;
+    flex-shrink: 0;
+  }
+  .card__placeholder {
+    font-size: 40px;
+  }
+  .card__room {
+    bottom: 8px;
+    left: 8px;
+    padding: 5px 9px;
+    font-size: 10px;
+  }
+  .card__body {
+    padding: 13px 14px;
+    gap: 6px;
+  }
+  .card__name {
+    font-size: 16px;
+  }
+  .card__bio {
+    font-size: 13px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card__tags {
+    gap: 5px;
+  }
+  .card .tag {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+  .card__tg {
+    padding: 11px;
+    font-size: 13px;
   }
 
   .groups__new {
