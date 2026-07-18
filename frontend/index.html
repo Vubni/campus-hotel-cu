@@ -9,7 +9,11 @@
     <title>Кампус-отель Диск — поиск соседей по комнате</title>
     <!-- SDK Telegram Mini App. Вне Telegram скрипт просто ничего не делает:
          window.Telegram.WebApp.initData останется пустым. -->
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- defer: без него скрипт блокирует разбор страницы, и если telegram.org
+         отвечает медленно (частый случай при блокировках/прокси), приложение
+         долго показывает пустой экран. С defer вёрстка рисуется сразу, а
+         порядок выполнения с модулем main.jsx сохраняется. -->
+    <script defer src="https://telegram.org/js/telegram-web-app.js"></script>
     <script>
       // Применяем тему до отрисовки, чтобы не было вспышки светлого экрана.
       (function () {

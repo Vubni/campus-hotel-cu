@@ -1,51 +1,130 @@
+import { useState } from "react";
 import { TRACK_OPTIONS } from "../labels.js";
 
+// [ключ фильтра, подпись «любой», [[значение, подпись], …]]
+const FILTER_SELECTS = [
+  ["track", "Направление: любое", TRACK_OPTIONS],
+  [
+    "course",
+    "Курс: любой",
+    [1, 2, 3, 4, 5, 6].map((c) => [String(c), `${c} курс`]),
+  ],
+  [
+    "room_capacity",
+    "Комната: любая",
+    [
+      ["2", "2 человека"],
+      ["3", "3 человека"],
+      ["4", "4 человека"],
+    ],
+  ],
+  [
+    "sleep_schedule",
+    "Режим сна: любой",
+    [
+      ["lark", "Жаворонок"],
+      ["owl", "Сова"],
+      ["any", "Без разницы"],
+    ],
+  ],
+  [
+    "smoking",
+    "Курение: любое",
+    [
+      ["no", "Не курит"],
+      ["yes", "Курит"],
+      ["vape", "Электронки"],
+    ],
+  ],
+  [
+    "tidiness",
+    "Аккуратность: любая",
+    [
+      ["relaxed", "Расслабленно"],
+      ["medium", "Умеренно"],
+      ["neat", "Аккуратно"],
+    ],
+  ],
+  [
+    "wakeup",
+    "Подъём: любой",
+    [
+      ["alarm_one", "Один будильник"],
+      ["alarm_many", "Десять будильников"],
+      ["natural", "Просыпается сам"],
+    ],
+  ],
+  [
+    "cooking",
+    "Готовка: любая",
+    [
+      ["self", "Готовит сам"],
+      ["together", "Готовит вместе"],
+      ["delivery", "Доставка / кафе"],
+    ],
+  ],
+  [
+    "guests",
+    "Гости: любые",
+    [
+      ["often", "Часто зовёт"],
+      ["sometimes", "Иногда"],
+      ["never", "Не зовёт"],
+    ],
+  ],
+];
+
 export default function Filters({ filters, onChange, onReset }) {
+  // Фильтров стало много — прячем их за кнопку, чтобы не занимали пол-экрана.
+  const [open, setOpen] = useState(false);
   const set = (key) => (e) => onChange({ ...filters, [key]: e.target.value });
+
+  // Поиск всегда на виду, поэтому в счётчик активных фильтров его не считаем.
+  const activeCount = FILTER_SELECTS.filter(
+    ([key]) => filters[key] !== "" && filters[key] !== undefined
+  ).length;
 
   return (
     <div className="filters">
-      <input
-        className="filters__search"
-        type="text"
-        placeholder="Поиск по имени и описанию…"
-        value={filters.search}
-        onChange={set("search")}
-      />
+      <div className="filters__bar">
+        <input
+          className="filters__search"
+          type="text"
+          placeholder="Поиск по имени и описанию…"
+          value={filters.search}
+          onChange={set("search")}
+        />
+        <button
+          type="button"
+          className={`filters__toggle${open ? " filters__toggle--on" : ""}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          Фильтры
+          {activeCount > 0 && (
+            <span className="filters__badge">{activeCount}</span>
+          )}
+          <span aria-hidden="true">{open ? "▲" : "▼"}</span>
+        </button>
+      </div>
 
-      <select value={filters.track} onChange={set("track")}>
-        <option value="">Направление: любое</option>
-        {TRACK_OPTIONS.map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-
-      <select value={filters.room_capacity} onChange={set("room_capacity")}>
-        <option value="">Комната: любая</option>
-        <option value="2">2 человека</option>
-        <option value="3">3 человека</option>
-        <option value="4">4 человека</option>
-      </select>
-
-      <select value={filters.sleep_schedule} onChange={set("sleep_schedule")}>
-        <option value="">Режим: любой</option>
-        <option value="lark">Жаворонок</option>
-        <option value="owl">Сова</option>
-        <option value="any">Без разницы</option>
-      </select>
-
-      <select value={filters.smoking} onChange={set("smoking")}>
-        <option value="">Курение: любое</option>
-        <option value="no">Не курит</option>
-        <option value="yes">Курит</option>
-        <option value="vape">Электронки</option>
-      </select>
-
-      <button className="filters__reset" onClick={onReset}>
-        Сбросить
-      </button>
+      {open && (
+        <div className="filters__panel">
+          {FILTER_SELECTS.map(([key, anyLabel, options]) => (
+            <select key={key} value={filters[key]} onChange={set(key)}>
+              <option value="">{anyLabel}</option>
+              {options.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          ))}
+          <button className="filters__reset" onClick={onReset}>
+            Сбросить фильтры
+          </button>
+        </div>
+      )}
     </div>
   );
 }

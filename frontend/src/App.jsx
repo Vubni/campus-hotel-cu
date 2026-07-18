@@ -24,9 +24,14 @@ const GENDER_KEY = "obshaga_gender";
 const EMPTY_FILTERS = {
   search: "",
   track: "",
+  course: "",
   room_capacity: "",
   sleep_schedule: "",
   smoking: "",
+  tidiness: "",
+  wakeup: "",
+  cooking: "",
+  guests: "",
 };
 
 const GENDER_WORD = { male: "Парни", female: "Девушки" };

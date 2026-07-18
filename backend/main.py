@@ -13,7 +13,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 import config
@@ -258,6 +258,11 @@ def list_profiles(
     smoking: Optional[str] = Query(None, pattern=schemas.SMOKING_PATTERN),
     sleep_schedule: Optional[str] = Query(None, pattern="^(lark|owl|any)$"),
     track: Optional[str] = Query(None, pattern=schemas.TRACK_PATTERN),
+    course: Optional[int] = Query(None, ge=1, le=6),
+    tidiness: Optional[str] = Query(None, pattern=schemas.TIDINESS_PATTERN),
+    wakeup: Optional[str] = Query(None, pattern=schemas.WAKEUP_PATTERN),
+    cooking: Optional[str] = Query(None, pattern=schemas.COOKING_ITEM_PATTERN),
+    guests: Optional[str] = Query(None, pattern=schemas.GUESTS_PATTERN),
     search: Optional[str] = Query(None),
     without_group: Optional[bool] = Query(
         None, description="true — только те, кто ещё не в компании"
@@ -283,6 +288,20 @@ def list_profiles(
         query = query.filter(models.Profile.sleep_schedule == sleep_schedule)
     if track:
         query = query.filter(models.Profile.track == track)
+    if course:
+        query = query.filter(models.Profile.course == course)
+    if tidiness:
+        query = query.filter(models.Profile.tidiness == tidiness)
+    if wakeup:
+        query = query.filter(models.Profile.wakeup == wakeup)
+    if guests:
+        query = query.filter(models.Profile.guests == guests)
+    if cooking:
+        # cooking хранится списком через запятую ("self,together"). Обрамляем
+        # запятыми с обеих сторон, чтобы искать элемент целиком, а не подстроку.
+        query = query.filter(
+            func.concat(",", models.Profile.cooking, ",").like(f"%,{cooking},%")
+        )
     if search:
         # Направление теперь выбирается фильтром, а не ищется текстом.
         like = f"%{search.lower()}%"

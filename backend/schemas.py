@@ -11,6 +11,8 @@ WAKEUP_PATTERN = "^(alarm_one|alarm_many|natural)$"
 GUESTS_PATTERN = "^(often|sometimes|never)$"
 
 COOKING_VALUES = ("self", "together", "delivery")
+# Для фильтра: одно значение из списка готовки.
+COOKING_ITEM_PATTERN = "^(self|together|delivery)$"
 
 
 def normalize_cooking(value) -> List[str]:
