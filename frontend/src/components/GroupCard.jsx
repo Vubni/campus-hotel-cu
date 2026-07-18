@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { TRACK, roomLabel } from "../labels.js";
-import LifestyleTags from "./LifestyleTags.jsx";
+import ProfileSpecs from "./ProfileSpecs.jsx";
 
 const SPOTS_WORD = (n) => (n === 1 ? "место" : n < 5 ? "места" : "мест");
 
@@ -49,10 +49,8 @@ function Member({ member }) {
       {open && (
         <div className="gmember__details">
           {member.bio && <p className="gmember__bio">{member.bio}</p>}
-          <div className="card__tags">
-            <span className="tag">{roomLabel(member.room_capacity)}</span>
-            <LifestyleTags profile={member} />
-          </div>
+          <span className="card__room">{roomLabel(member.room_capacity)}</span>
+          <ProfileSpecs profile={member} />
           <a
             className="gmember__tg"
             href={`https://t.me/${member.telegram}`}

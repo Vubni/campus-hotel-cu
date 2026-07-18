@@ -72,6 +72,42 @@ const FILTER_SELECTS = [
       ["never", "Не зовёт"],
     ],
   ],
+  [
+    "shower",
+    "Душ: любой",
+    [
+      ["morning", "Утром"],
+      ["evening", "Вечером"],
+      ["any", "Когда как"],
+    ],
+  ],
+  [
+    "temperature",
+    "Температура: любая",
+    [
+      ["cool", "Прохладно"],
+      ["medium", "Нормально"],
+      ["warm", "Тепло"],
+    ],
+  ],
+  [
+    "noise",
+    "Звук: любой",
+    [
+      ["quiet", "Тишина"],
+      ["headphones", "В наушниках"],
+      ["loud", "Музыка вслух"],
+    ],
+  ],
+  [
+    "alcohol",
+    "Алкоголь: любой",
+    [
+      ["no", "Не пьёт"],
+      ["sometimes", "Иногда"],
+      ["often", "Часто"],
+    ],
+  ],
 ];
 
 export default function Filters({ filters, onChange, onReset }) {

@@ -29,6 +29,10 @@ const EMPTY_FORM = {
   wakeup: "alarm_one",
   cooking: ["self"], // можно выбрать несколько
   guests: "sometimes",
+  shower: "any",
+  temperature: "medium",
+  noise: "headphones",
+  alcohol: "sometimes",
 };
 
 const COOKING_CHOICES = [
@@ -350,6 +354,44 @@ export default function AddProfileModal({
                 <option value="often">Часто зову гостей</option>
                 <option value="sometimes">Иногда</option>
                 <option value="never">Не зову</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="field-row">
+            <label className="field">
+              <span>Душ</span>
+              <select value={form.shower} onChange={set("shower")}>
+                <option value="any">Когда как</option>
+                <option value="morning">Утром</option>
+                <option value="evening">Вечером</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Температура в комнате</span>
+              <select value={form.temperature} onChange={set("temperature")}>
+                <option value="cool">Прохладно</option>
+                <option value="medium">Нормально</option>
+                <option value="warm">Тепло</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="field-row">
+            <label className="field">
+              <span>Звук</span>
+              <select value={form.noise} onChange={set("noise")}>
+                <option value="quiet">Тишина</option>
+                <option value="headphones">Слушаю в наушниках</option>
+                <option value="loud">Музыка вслух</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Алкоголь</span>
+              <select value={form.alcohol} onChange={set("alcohol")}>
+                <option value="no">Не пью</option>
+                <option value="sometimes">Иногда</option>
+                <option value="often">Часто</option>
               </select>
             </label>
           </div>

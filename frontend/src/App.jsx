@@ -32,6 +32,10 @@ const EMPTY_FILTERS = {
   wakeup: "",
   cooking: "",
   guests: "",
+  shower: "",
+  temperature: "",
+  noise: "",
+  alcohol: "",
 };
 
 const GENDER_WORD = { male: "Парни", female: "Девушки" };

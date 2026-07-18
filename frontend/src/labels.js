@@ -11,51 +11,64 @@ export const TRACK = {
 
 export const TRACK_OPTIONS = Object.entries(TRACK); // [[value, label], …]
 
-export const SLEEP = {
-  lark: "🌅 Жаворонок",
-  owl: "🌙 Сова",
-  any: "🕐 Без разницы",
-};
-
-export const SMOKING = {
-  yes: "🚬 Курит",
-  no: "🚭 Не курит",
-  vape: "💨 Электронки",
-};
-
-// Аккуратность (бывшая «чистоплотность»): три режима.
+// Подписи значений — без эмодзи: иконка живёт отдельно, в описании характеристики.
+export const SLEEP = { lark: "Жаворонок", owl: "Сова", any: "Без разницы" };
+export const SMOKING = { no: "Не курит", yes: "Курит", vape: "Электронки" };
 export const TIDINESS = {
-  relaxed: "🧦 Расслабленно",
-  medium: "🧹 Умеренно",
-  neat: "✨ Аккуратно",
+  relaxed: "Расслабленно",
+  medium: "Умеренно",
+  neat: "Аккуратно",
 };
-
-// Подъём утром.
 export const WAKEUP = {
-  alarm_one: "⏰ Один будильник",
-  alarm_many: "😴 Десять будильников",
-  natural: "🌤️ Просыпаюсь сам",
+  alarm_one: "Один будильник",
+  alarm_many: "Десять будильников",
+  natural: "Просыпается сам",
 };
-
-// Готовка.
-export const COOKING = {
-  self: "🍳 Готовлю сам",
-  together: "🥘 Готовим вместе",
-  delivery: "🛵 Доставка и кафе",
+export const COOKING = { self: "Сам", together: "Вместе", delivery: "Доставка" };
+export const GUESTS = { often: "Часто", sometimes: "Иногда", never: "Не зовёт" };
+export const SHOWER = { morning: "Утром", evening: "Вечером", any: "Когда как" };
+export const TEMPERATURE = {
+  cool: "Прохладно",
+  medium: "Нормально",
+  warm: "Тепло",
 };
-
-// Гости.
-export const GUESTS = {
-  often: "🎉 Часто зову гостей",
-  sometimes: "🙂 Иногда гости",
-  never: "🚪 Не зову гостей",
+export const NOISE = {
+  quiet: "Тишина",
+  headphones: "В наушниках",
+  loud: "Музыка вслух",
 };
+export const ALCOHOL = { no: "Не пьёт", sometimes: "Иногда", often: "Часто" };
 
-export function courseLabel(course) {
-  return `🎓 ${course} курс`;
+/** Готовка — список, поэтому подписи склеиваем: «Сам, вместе». */
+export function cookingLabel(value) {
+  const items = Array.isArray(value) ? value : [value].filter(Boolean);
+  return items
+    .map((key, i) => {
+      const label = COOKING[key] || "";
+      return i === 0 ? label : label.toLowerCase();
+    })
+    .filter(Boolean)
+    .join(", ");
 }
 
 // capacity === null — «не предпочтительно»: подойдёт комната любого размера.
 export function roomLabel(capacity) {
   return capacity ? `Комната на ${capacity} чел.` : "Комната: не важно";
 }
+
+/**
+ * Характеристики анкеты для показа: [иконка, подпись, значение].
+ * Один источник правды — используется и в карточке, и в раскрытом участнике.
+ */
+export const SPECS = [
+  ["🌙", "Режим сна", (p) => SLEEP[p.sleep_schedule]],
+  ["⏰", "Подъём", (p) => WAKEUP[p.wakeup]],
+  ["🚿", "Душ", (p) => SHOWER[p.shower]],
+  ["✨", "Аккуратность", (p) => TIDINESS[p.tidiness]],
+  ["🌡️", "Температура", (p) => TEMPERATURE[p.temperature]],
+  ["🔊", "Звук", (p) => NOISE[p.noise]],
+  ["🍳", "Готовка", (p) => cookingLabel(p.cooking)],
+  ["🎉", "Гости", (p) => GUESTS[p.guests]],
+  ["🚭", "Курение", (p) => SMOKING[p.smoking]],
+  ["🍻", "Алкоголь", (p) => ALCOHOL[p.alcohol]],
+];

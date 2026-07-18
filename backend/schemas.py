@@ -9,6 +9,10 @@ SMOKING_PATTERN = "^(yes|no|vape)$"
 TIDINESS_PATTERN = "^(relaxed|medium|neat)$"
 WAKEUP_PATTERN = "^(alarm_one|alarm_many|natural)$"
 GUESTS_PATTERN = "^(often|sometimes|never)$"
+SHOWER_PATTERN = "^(morning|evening|any)$"
+TEMPERATURE_PATTERN = "^(cool|medium|warm)$"
+NOISE_PATTERN = "^(quiet|headphones|loud)$"
+ALCOHOL_PATTERN = "^(no|sometimes|often)$"
 
 COOKING_VALUES = ("self", "together", "delivery")
 # Для фильтра: одно значение из списка готовки.
@@ -56,6 +60,10 @@ class ProfileBase(BaseModel):
     # Несколько вариантов готовки; хранится строкой через запятую, наружу — список.
     cooking: List[str] = Field(default_factory=lambda: ["self"])
     guests: str = Field("sometimes", pattern=GUESTS_PATTERN)
+    shower: str = Field("any", pattern=SHOWER_PATTERN)
+    temperature: str = Field("medium", pattern=TEMPERATURE_PATTERN)
+    noise: str = Field("headphones", pattern=NOISE_PATTERN)
+    alcohol: str = Field("sometimes", pattern=ALCOHOL_PATTERN)
 
     @field_validator("cooking", mode="before")
     @classmethod
@@ -111,6 +119,10 @@ class GroupMemberOut(BaseModel):
     wakeup: str = "alarm_one"
     cooking: List[str] = Field(default_factory=lambda: ["self"])
     guests: str = "sometimes"
+    shower: str = "any"
+    temperature: str = "medium"
+    noise: str = "headphones"
+    alcohol: str = "sometimes"
 
     @field_validator("cooking", mode="before")
     @classmethod

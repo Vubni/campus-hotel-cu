@@ -83,6 +83,14 @@ class Profile(Base):
     cooking = Column(String(60), nullable=False, default="self")
     # Гости: often (часто) | sometimes (иногда) | never (не зову)
     guests = Column(String(20), nullable=False, default="sometimes")
+    # Душ: morning (утром) | evening (вечером) | any (когда как)
+    shower = Column(String(20), nullable=False, default="any")
+    # Температура в комнате: cool (прохладно) | medium (нормально) | warm (тепло)
+    temperature = Column(String(20), nullable=False, default="medium")
+    # Звук: quiet (тишина) | headphones (в наушниках) | loud (музыка вслух)
+    noise = Column(String(20), nullable=False, default="headphones")
+    # Алкоголь: no (не пью) | sometimes (иногда) | often (часто)
+    alcohol = Column(String(20), nullable=False, default="sometimes")
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

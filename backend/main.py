@@ -135,6 +135,20 @@ def ensure_columns() -> None:
             text("ALTER TABLE profiles ALTER COLUMN cooking TYPE VARCHAR(60)")
         )
 
+        # Быт по просьбам пользователей: душ, температура, звук, алкоголь.
+        for column, default in (
+            ("shower", "any"),
+            ("temperature", "medium"),
+            ("noise", "headphones"),
+            ("alcohol", "sometimes"),
+        ):
+            conn.execute(
+                text(
+                    f"ALTER TABLE profiles ADD COLUMN IF NOT EXISTS {column} "
+                    f"VARCHAR(20) NOT NULL DEFAULT '{default}'"
+                )
+            )
+
         # Чистоплотность (1..5) → аккуратность (relaxed | medium | neat).
         conn.execute(
             text(
@@ -263,6 +277,10 @@ def list_profiles(
     wakeup: Optional[str] = Query(None, pattern=schemas.WAKEUP_PATTERN),
     cooking: Optional[str] = Query(None, pattern=schemas.COOKING_ITEM_PATTERN),
     guests: Optional[str] = Query(None, pattern=schemas.GUESTS_PATTERN),
+    shower: Optional[str] = Query(None, pattern=schemas.SHOWER_PATTERN),
+    temperature: Optional[str] = Query(None, pattern=schemas.TEMPERATURE_PATTERN),
+    noise: Optional[str] = Query(None, pattern=schemas.NOISE_PATTERN),
+    alcohol: Optional[str] = Query(None, pattern=schemas.ALCOHOL_PATTERN),
     search: Optional[str] = Query(None),
     without_group: Optional[bool] = Query(
         None, description="true — только те, кто ещё не в компании"
@@ -296,6 +314,14 @@ def list_profiles(
         query = query.filter(models.Profile.wakeup == wakeup)
     if guests:
         query = query.filter(models.Profile.guests == guests)
+    if shower:
+        query = query.filter(models.Profile.shower == shower)
+    if temperature:
+        query = query.filter(models.Profile.temperature == temperature)
+    if noise:
+        query = query.filter(models.Profile.noise == noise)
+    if alcohol:
+        query = query.filter(models.Profile.alcohol == alcohol)
     if cooking:
         # cooking хранится списком через запятую ("self,together"). Обрамляем
         # запятыми с обеих сторон, чтобы искать элемент целиком, а не подстроку.
