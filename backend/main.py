@@ -71,6 +71,13 @@ def ensure_columns() -> None:
             text("ALTER TABLE profiles ALTER COLUMN room_capacity DROP NOT NULL")
         )
 
+        # «О себе» — была в модели, но не в миграции: на базах, где таблица уже
+        # существовала до этого поля, любой запрос к анкетам падал с ошибкой
+        # "column profiles.bio does not exist".
+        conn.execute(
+            text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT ''")
+        )
+
         # Факультет (свободный текст) → направление (5 вариантов).
         conn.execute(
             text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS track VARCHAR(20)")
