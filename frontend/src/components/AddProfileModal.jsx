@@ -5,6 +5,7 @@ import {
   createProfile,
   deleteProfile,
   fetchConfig,
+  fetchTelegramPhotos,
   updateProfile,
 } from "../api.js";
 import { getInitData, isInsideTelegram } from "../telegram.js";
@@ -21,7 +22,7 @@ const EMPTY_FORM = {
   photo_url: "",
   telegram: "",
   track: "",
-  course: "",
+  course: 1, // варианта «не выбрано» нет — по умолчанию 1 курс
   bio: "",
   room_capacity: "",
   sleep_schedule: "",
@@ -43,7 +44,7 @@ const COOKING_CHOICES = [
 ];
 
 // Лимит на длину «о себе»: чтобы текст всегда помещался в карточку целиком.
-const BIO_MAX = 300;
+const BIO_MAX = 500;
 
 /** Собираем форму из существующей анкеты (режим редактирования). */
 function formFromProfile(profile) {
@@ -55,7 +56,7 @@ function formFromProfile(profile) {
   }
   // NULL на сервере = «не выбрано» — в селекте это пустая строка.
   form.room_capacity = profile.room_capacity ?? "";
-  form.course = profile.course ?? "";
+  form.course = profile.course ?? 1;
   // Готовка — всегда массив (на случай старых строковых данных).
   form.cooking = Array.isArray(profile.cooking)
     ? profile.cooking
@@ -85,6 +86,9 @@ export default function AddProfileModal({
   const [verified, setVerified] = useState(
     isEdit ? Boolean(profile.telegram_verified) : false
   );
+  // Аватарки из Telegram: у человека их может быть несколько.
+  const [tgPhotos, setTgPhotos] = useState([]);
+  const [photosBusy, setPhotosBusy] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -147,6 +151,23 @@ export default function AddProfileModal({
     }
   }
 
+  /** Тянем все аватарки профиля Telegram, чтобы было из чего выбирать. */
+  async function loadTelegramPhotos() {
+    setError("");
+    setPhotosBusy(true);
+    try {
+      const { photos } = await fetchTelegramPhotos(getInitData());
+      setTgPhotos(photos);
+      if (photos.length === 0) {
+        setError("В профиле Telegram не нашлось аватарок");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPhotosBusy(false);
+    }
+  }
+
   // Внутри Telegram сразу подтягиваем ник и фото — без лишней кнопки.
   useEffect(() => {
     if (insideTelegram && !isEdit) {
@@ -168,7 +189,7 @@ export default function AddProfileModal({
         // "" — «не выбрано»: шлём null, иначе Number("") дал бы 0.
         room_capacity:
           form.room_capacity === "" ? null : Number(form.room_capacity),
-        course: form.course === "" ? null : Number(form.course),
+        course: Number(form.course),
         // Сервер перепроверит подпись и сам решит, ставить ли галочку.
         ...(tgAuth || {}),
       };
@@ -217,7 +238,6 @@ export default function AddProfileModal({
             <label className="field field--sm">
               <span>Курс</span>
               <select value={form.course} onChange={set("course")}>
-                <option value="">—</option>
                 {[1, 2, 3, 4, 5, 6].map((c) => (
                   <option key={c} value={c}>
                     {c}
@@ -251,6 +271,46 @@ export default function AddProfileModal({
               onChange={(url) => setForm((prev) => ({ ...prev, photo_url: url }))}
               onError={setError}
             />
+
+            {/* Аватарок в Telegram бывает несколько — даём выбрать, а не
+                молча ставим первую. */}
+            {insideTelegram && (
+              <div className="tg-photos">
+                {tgPhotos.length > 0 ? (
+                  <>
+                    <span className="tg-photos__hint">
+                      Аватарки из Telegram — выбери подходящую:
+                    </span>
+                    <div className="tg-photos__list">
+                      {tgPhotos.map((url) => (
+                        <button
+                          key={url}
+                          type="button"
+                          className={`tg-photos__item${
+                            form.photo_url === url ? " tg-photos__item--on" : ""
+                          }`}
+                          onClick={() =>
+                            setForm((prev) => ({ ...prev, photo_url: url }))
+                          }
+                          aria-pressed={form.photo_url === url}
+                        >
+                          <img src={url} alt="" loading="lazy" />
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="tg-block__btn"
+                    onClick={loadTelegramPhotos}
+                    disabled={photosBusy}
+                  >
+                    {photosBusy ? "Загружаем…" : "Выбрать аватарку из Telegram"}
+                  </button>
+                )}
+              </div>
+            )}
 
             {tgConfirmed ? (
               <p className="tg-block__done">
@@ -377,7 +437,7 @@ export default function AddProfileModal({
               </select>
             </label>
             <label className="field">
-              <span>Температура в комнате</span>
+              <span>Температура</span>
               <select value={form.temperature} onChange={set("temperature")}>
                 <option value="">Не выбрано</option>
                 <option value="cool">Прохладно</option>

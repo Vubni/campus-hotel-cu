@@ -54,7 +54,7 @@ class ProfileBase(BaseModel):
     # Ниже "" везде значит «не выбрано» — характеристику просто не показываем,
     # вместо того чтобы врать значением по умолчанию.
     track: str = Field(UNSET, pattern=TRACK_PATTERN)
-    course: Optional[int] = Field(None, ge=1, le=6)
+    course: int = Field(1, ge=1, le=6)  # варианта «не выбрано» нет
     bio: str = ""
 
     # None — «не предпочтительно»: подойдёт комната любого размера.
@@ -117,7 +117,7 @@ class GroupMemberOut(BaseModel):
     track: str = UNSET
     telegram_verified: bool = False
 
-    course: Optional[int] = None
+    course: int = 1
     bio: str = ""
     room_capacity: Optional[int] = None
     sleep_schedule: str = UNSET
@@ -260,6 +260,12 @@ class BotVote(BaseModel):
 
 class PhotoOut(BaseModel):
     photo_url: str
+
+
+class TelegramPhotosOut(BaseModel):
+    """Аватарки из профиля Telegram, уже сохранённые у нас."""
+
+    photos: List[str] = []
 
 
 class ConfigOut(BaseModel):

@@ -3,15 +3,15 @@ import { TRACK_OPTIONS } from "../labels.js";
 
 // [ключ фильтра, подпись «любой», [[значение, подпись], …]]
 const FILTER_SELECTS = [
-  ["track", "Направление: любое", TRACK_OPTIONS],
+  ["track", "Направление", TRACK_OPTIONS],
   [
     "course",
-    "Курс: любой",
+    "Курс",
     [1, 2, 3, 4, 5, 6].map((c) => [String(c), `${c} курс`]),
   ],
   [
     "room_capacity",
-    "Комната: любая",
+    "Комната",
     [
       ["2", "2 человека"],
       ["3", "3 человека"],
@@ -20,7 +20,7 @@ const FILTER_SELECTS = [
   ],
   [
     "sleep_schedule",
-    "Режим сна: любой",
+    "Режим сна",
     [
       ["lark", "Жаворонок"],
       ["owl", "Сова"],
@@ -29,7 +29,7 @@ const FILTER_SELECTS = [
   ],
   [
     "smoking",
-    "Курение: любое",
+    "Курение",
     [
       ["no", "Не курит"],
       ["yes", "Курит"],
@@ -38,7 +38,7 @@ const FILTER_SELECTS = [
   ],
   [
     "tidiness",
-    "Аккуратность: любая",
+    "Аккуратность",
     [
       ["relaxed", "Расслабленно"],
       ["medium", "Умеренно"],
@@ -47,7 +47,7 @@ const FILTER_SELECTS = [
   ],
   [
     "wakeup",
-    "Подъём: любой",
+    "Подъём",
     [
       ["alarm_one", "Один будильник"],
       ["alarm_many", "Десять будильников"],
@@ -56,7 +56,7 @@ const FILTER_SELECTS = [
   ],
   [
     "cooking",
-    "Готовка: любая",
+    "Готовка",
     [
       ["self", "Готовит сам"],
       ["together", "Готовит вместе"],
@@ -65,7 +65,7 @@ const FILTER_SELECTS = [
   ],
   [
     "guests",
-    "Гости: любые",
+    "Гости",
     [
       ["often", "Часто зовёт"],
       ["sometimes", "Иногда"],
@@ -74,7 +74,7 @@ const FILTER_SELECTS = [
   ],
   [
     "shower",
-    "Душ: любой",
+    "Душ",
     [
       ["morning", "Утром"],
       ["evening", "Вечером"],
@@ -83,7 +83,7 @@ const FILTER_SELECTS = [
   ],
   [
     "temperature",
-    "Температура: любая",
+    "Температура",
     [
       ["cool", "Прохладно"],
       ["medium", "Нормально"],
@@ -92,7 +92,7 @@ const FILTER_SELECTS = [
   ],
   [
     "noise",
-    "Звук: любой",
+    "Звук",
     [
       ["quiet", "Тишина"],
       ["headphones", "В наушниках"],
@@ -101,7 +101,7 @@ const FILTER_SELECTS = [
   ],
   [
     "alcohol",
-    "Алкоголь: любой",
+    "Алкоголь",
     [
       ["no", "Не пьёт"],
       ["sometimes", "Иногда"],

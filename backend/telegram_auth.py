@@ -97,6 +97,55 @@ def verify_webapp_init_data(init_data: str) -> dict:
     return user
 
 
+async def fetch_profile_photos(telegram_id: int, limit: int = 6) -> list[bytes]:
+    """Скачивает аватарки пользователя — у многих их несколько.
+
+    Через Bot API: getUserProfilePhotos отдаёт список, каждая аватарка — набор
+    размеров; берём самый крупный. Возвращаем сами картинки, чтобы вызывающий
+    сохранил их у себя и дал человеку выбрать.
+    """
+    if not TELEGRAM_BOT_TOKEN:
+        return []
+
+    api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+    files = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
+    photos: list[bytes] = []
+    try:
+        async with httpx.AsyncClient(
+            timeout=15, follow_redirects=True, proxy=TELEGRAM_PROXY_URL
+        ) as client:
+            resp = await client.get(
+                f"{api}/getUserProfilePhotos",
+                params={"user_id": telegram_id, "limit": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok"):
+                return []
+
+            for sizes in data["result"].get("photos", []):
+                if not sizes:
+                    continue
+                # Размеры отсортированы по возрастанию — берём последний.
+                file_id = sizes[-1]["file_id"]
+                info = await client.get(f"{api}/getFile", params={"file_id": file_id})
+                if info.status_code != 200 or not info.json().get("ok"):
+                    continue
+                path = info.json()["result"].get("file_path")
+                if not path:
+                    continue
+                blob = await client.get(f"{files}/{path}")
+                if blob.status_code != 200:
+                    continue
+                if len(blob.content) > MAX_UPLOAD_BYTES:
+                    continue
+                photos.append(blob.content)
+    except (httpx.HTTPError, httpx.InvalidURL, KeyError, ValueError):
+        # Аватарки — приятное дополнение: не смогли получить, не страшно.
+        return photos
+    return photos
+
+
 async def download_avatar(url: str) -> Optional[bytes]:
     """Скачивает аватар с CDN Telegram.
 

@@ -69,7 +69,7 @@ class Profile(Base):
     # подставлять выдуманное значение.
     # Направление: dev | business | design | ai | undecided | ""
     track = Column(String(20), nullable=False, default="")
-    course = Column(Integer, nullable=True)  # курс 1..6, NULL — не выбран
+    course = Column(Integer, nullable=False, default=1)  # курс 1..6, по умолчанию 1
     bio = Column(Text, nullable=False, default="")
 
     # 2, 3, 4 или NULL — «не предпочтительно», подойдёт любая комната.

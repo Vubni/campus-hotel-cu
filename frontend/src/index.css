@@ -14,6 +14,8 @@
   --radius: 22px;
   --radius-sm: 14px;
   --pill: 999px;
+  /* Своя стрелка для select: нативная выглядит по-разному в каждом браузере. */
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%236b6b76' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 :root[data-theme="dark"] {
@@ -27,6 +29,7 @@
   --solid-bg: #f3f3f6;
   --solid-text: #17171c;
   --photo-bg: linear-gradient(135deg, #232430, #1b1b22);
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%239a9aa6' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 html {
@@ -403,6 +406,12 @@ body {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+/* У блока характеристик уже есть нижняя граница — иначе линии шли бы парой.
+   Своя граница нужна только когда характеристик нет и блок идёт первым. */
+.specs + .card__invite,
+.specs + .card__invite-sent {
+  border-top: none;
+}
 .card__invite-label {
   font-size: 12px;
   font-weight: 700;
@@ -763,6 +772,9 @@ body {
 .field-row {
   display: flex;
   gap: 12px;
+  /* Подписи бывают в одну и в две строки — равняем поля по низу, чтобы
+     соседние селекты стояли на одной линии. */
+  align-items: end;
 }
 .field {
   display: flex;
@@ -796,6 +808,43 @@ body {
   font-size: 14px;
   font-family: inherit;
   outline: none;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* ===== Единый вид выпадающих списков =====
+   Нативный select рисуется по-своему в каждом браузере и выбивался из
+   остального оформления. Убираем системный вид и ставим свою стрелку. */
+.field select,
+.filters select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  /* Место справа под стрелку, чтобы длинный текст её не задевал. */
+  padding-right: 38px;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 8px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.field select:hover,
+.filters select:hover {
+  border-color: var(--accent);
+}
+/* Кольцо фокуса — заметно и не дёргает вёрстку (тень вместо толщины рамки). */
+.field select:focus,
+.filters select:focus,
+.field input:focus,
+.field textarea:focus,
+.filters input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+/* Список вариантов: в тёмной теме браузер иначе рисует его белым. */
+.field select option,
+.filters select option {
   background: var(--surface);
   color: var(--ink);
 }
@@ -1353,6 +1402,48 @@ a.gmember:hover {
   opacity: 0.6;
   cursor: default;
 }
+/* ===== Выбор аватарки из Telegram ===== */
+.tg-photos {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tg-photos__hint {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.tg-photos__list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tg-photos__item {
+  width: 62px;
+  height: 62px;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--photo-bg);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.tg-photos__item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.tg-photos__item:hover {
+  border-color: var(--accent);
+}
+/* Выбранная — обведена акцентом, чтобы выбор был очевиден. */
+.tg-photos__item--on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 .tg-block__done {
   margin-top: 12px;
   font-size: 13px;
@@ -1568,6 +1659,12 @@ a.gmember:hover {
   .filters__panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+  }
+  /* В двух колонках места мало — поджимаем отступы, чтобы подпись влезала. */
+  .filters__panel select {
+    padding-left: 14px;
+    padding-right: 30px;
+    background-position: right 11px center;
   }
 
   .grid,

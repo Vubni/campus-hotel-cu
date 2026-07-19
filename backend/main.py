@@ -228,8 +228,10 @@ def ensure_columns() -> None:
 
         # ===== «Не выбрано» вместо выдуманных значений =====
         # Идёт последним: к этому моменту все колонки точно существуют.
-        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course DROP NOT NULL"))
-        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course DROP DEFAULT"))
+        # Курс — исключение: варианта «не выбрано» у него нет, по умолчанию 1-й.
+        conn.execute(text("UPDATE profiles SET course = 1 WHERE course IS NULL"))
+        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course SET DEFAULT 1"))
+        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course SET NOT NULL"))
         for column in (
             "track",
             "sleep_schedule",
@@ -265,7 +267,6 @@ def ensure_columns() -> None:
                 text(
                     """
                     UPDATE profiles SET
-                        course = NULL,
                         wakeup = '',
                         cooking = '',
                         guests = '',
@@ -369,6 +370,27 @@ async def auth_telegram_webapp(payload: schemas.TelegramWebAppAuth):
     except telegram_auth.TelegramAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
     return await _telegram_profile(user)
+
+
+@app.post("/api/telegram/photos", response_model=schemas.TelegramPhotosOut)
+async def telegram_photos(payload: schemas.TelegramWebAppAuth):
+    """Все аватарки из профиля Telegram — чтобы человек выбрал нужную.
+
+    Раньше молча бралась первая, хотя у многих аватарок несколько.
+    """
+    try:
+        user = telegram_auth.verify_webapp_init_data(payload.init_data)
+    except telegram_auth.TelegramAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    blobs = await telegram_auth.fetch_profile_photos(int(user["id"]))
+    urls: List[str] = []
+    for blob in blobs:
+        try:
+            urls.append(storage.save_image(blob))
+        except storage.InvalidImage:
+            continue
+    return schemas.TelegramPhotosOut(photos=urls)
 
 
 @app.get(

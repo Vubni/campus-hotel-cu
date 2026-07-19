@@ -110,6 +110,16 @@ export async function leaveGroup(groupId, profileId) {
   return jsonOrThrow(res, "Не удалось выйти из компании");
 }
 
+/** Все аватарки из профиля Telegram — чтобы выбрать нужную, а не первую. */
+export async function fetchTelegramPhotos(initData) {
+  const res = await fetch(`${BASE}/telegram/photos`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ init_data: initData }),
+  });
+  return jsonOrThrow(res, "Не удалось получить аватарки из Telegram");
+}
+
 /** Найти свою анкету по подписи Telegram — не полагаясь на localStorage. */
 export async function fetchMyProfileByTelegram(initData) {
   const res = await fetch(`${BASE}/profiles/me`, {

@@ -29,6 +29,10 @@ export default function RoommateCard({
   const canInvite =
     myProfile &&
     myProfile.id !== profile.id &&
+    // Парни живут с парнями, девушки — с девушками. Ленту чужого пола можно
+    // открыть, переключив выбор в шапке, поэтому кнопку прячем здесь же —
+    // сервер такую заявку всё равно отклонит.
+    myProfile.gender === profile.gender &&
     !myProfile.group_id &&
     !profile.group_id &&
     !invite &&
