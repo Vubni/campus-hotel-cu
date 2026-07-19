@@ -46,6 +46,9 @@ const COOKING_CHOICES = [
 // Лимит на длину «о себе»: чтобы текст всегда помещался в карточку целиком.
 const BIO_MAX = 500;
 
+// Сколько аватарок показываем сразу; остальные — по кнопке «Показать ещё».
+const PHOTOS_PAGE = 6;
+
 /** Собираем форму из существующей анкеты (режим редактирования). */
 function formFromProfile(profile) {
   const form = { ...EMPTY_FORM };
@@ -88,6 +91,7 @@ export default function AddProfileModal({
   );
   // Аватарки из Telegram: у человека их может быть несколько.
   const [tgPhotos, setTgPhotos] = useState([]);
+  const [tgPhotosTotal, setTgPhotosTotal] = useState(0);
   const [photosBusy, setPhotosBusy] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -151,27 +155,34 @@ export default function AddProfileModal({
     }
   }
 
-  /** Тянем все аватарки профиля Telegram, чтобы было из чего выбирать. */
-  async function loadTelegramPhotos() {
-    setError("");
+  /** Догружаем очередную порцию аватарок профиля Telegram. */
+  async function loadTelegramPhotos(offset = 0) {
     setPhotosBusy(true);
     try {
-      const { photos } = await fetchTelegramPhotos(getInitData());
-      setTgPhotos(photos);
-      if (photos.length === 0) {
-        setError("В профиле Telegram не нашлось аватарок");
-      }
-    } catch (err) {
-      setError(err.message);
+      const { photos, total } = await fetchTelegramPhotos(
+        getInitData(),
+        offset,
+        PHOTOS_PAGE
+      );
+      // offset = 0 — первая загрузка, иначе добавляем к уже показанным.
+      setTgPhotos((prev) => (offset === 0 ? photos : [...prev, ...photos]));
+      setTgPhotosTotal(total);
+    } catch {
+      // Аватарки — необязательная подсказка: молча обходимся без них,
+      // фото всегда можно загрузить файлом.
     } finally {
       setPhotosBusy(false);
     }
   }
 
-  // Внутри Telegram сразу подтягиваем ник и фото — без лишней кнопки.
   useEffect(() => {
+    // Внутри Telegram сразу подтягиваем ник и фото — без лишней кнопки.
     if (insideTelegram && !isEdit) {
       handleWebAppAuth();
+    }
+    // Аватарки показываем всегда — и при создании, и при изменении анкеты.
+    if (insideTelegram) {
+      loadTelegramPhotos(0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -274,39 +285,43 @@ export default function AddProfileModal({
 
             {/* Аватарок в Telegram бывает несколько — даём выбрать, а не
                 молча ставим первую. */}
-            {insideTelegram && (
+            {insideTelegram && (tgPhotos.length > 0 || photosBusy) && (
               <div className="tg-photos">
-                {tgPhotos.length > 0 ? (
-                  <>
-                    <span className="tg-photos__hint">
-                      Аватарки из Telegram — выбери подходящую:
-                    </span>
-                    <div className="tg-photos__list">
-                      {tgPhotos.map((url) => (
-                        <button
-                          key={url}
-                          type="button"
-                          className={`tg-photos__item${
-                            form.photo_url === url ? " tg-photos__item--on" : ""
-                          }`}
-                          onClick={() =>
-                            setForm((prev) => ({ ...prev, photo_url: url }))
-                          }
-                          aria-pressed={form.photo_url === url}
-                        >
-                          <img src={url} alt="" loading="lazy" />
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : (
+                <span className="tg-photos__hint">
+                  {photosBusy && tgPhotos.length === 0
+                    ? "Загружаем аватарки из Telegram…"
+                    : "Аватарки из Telegram — нажми, чтобы поставить:"}
+                </span>
+
+                <div className="tg-photos__list">
+                  {tgPhotos.map((url) => (
+                    <button
+                      key={url}
+                      type="button"
+                      className={`tg-photos__item${
+                        form.photo_url === url ? " tg-photos__item--on" : ""
+                      }`}
+                      onClick={() =>
+                        setForm((prev) => ({ ...prev, photo_url: url }))
+                      }
+                      aria-pressed={form.photo_url === url}
+                    >
+                      <img src={url} alt="" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+
+                {/* Остальные аватарки — по кнопке, чтобы не грузить всё сразу. */}
+                {tgPhotos.length < tgPhotosTotal && (
                   <button
                     type="button"
-                    className="tg-block__btn"
-                    onClick={loadTelegramPhotos}
+                    className="tg-photos__more"
+                    onClick={() => loadTelegramPhotos(tgPhotos.length)}
                     disabled={photosBusy}
                   >
-                    {photosBusy ? "Загружаем…" : "Выбрать аватарку из Telegram"}
+                    {photosBusy
+                      ? "Загружаем…"
+                      : `Показать ещё (${tgPhotosTotal - tgPhotos.length})`}
                   </button>
                 )}
               </div>

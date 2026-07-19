@@ -373,24 +373,27 @@ async def auth_telegram_webapp(payload: schemas.TelegramWebAppAuth):
 
 
 @app.post("/api/telegram/photos", response_model=schemas.TelegramPhotosOut)
-async def telegram_photos(payload: schemas.TelegramWebAppAuth):
-    """Все аватарки из профиля Telegram — чтобы человек выбрал нужную.
+async def telegram_photos(payload: schemas.TelegramPhotosIn):
+    """Аватарки из профиля Telegram — чтобы человек выбрал нужную.
 
     Раньше молча бралась первая, хотя у многих аватарок несколько.
+    Отдаём порциями: total подскажет фронту, осталось ли что догружать.
     """
     try:
         user = telegram_auth.verify_webapp_init_data(payload.init_data)
     except telegram_auth.TelegramAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 
-    blobs = await telegram_auth.fetch_profile_photos(int(user["id"]))
+    blobs, total = await telegram_auth.fetch_profile_photos(
+        int(user["id"]), limit=payload.limit, offset=payload.offset
+    )
     urls: List[str] = []
     for blob in blobs:
         try:
             urls.append(storage.save_image(blob))
         except storage.InvalidImage:
             continue
-    return schemas.TelegramPhotosOut(photos=urls)
+    return schemas.TelegramPhotosOut(photos=urls, total=total)
 
 
 @app.get(

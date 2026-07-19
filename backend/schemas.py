@@ -262,10 +262,18 @@ class PhotoOut(BaseModel):
     photo_url: str
 
 
+class TelegramPhotosIn(TelegramWebAppAuth):
+    """Запрос порции аватарок: тянуть сразу все долго, особенно через прокси."""
+
+    offset: int = Field(0, ge=0)
+    limit: int = Field(6, ge=1, le=20)
+
+
 class TelegramPhotosOut(BaseModel):
     """Аватарки из профиля Telegram, уже сохранённые у нас."""
 
     photos: List[str] = []
+    total: int = 0  # сколько всего аватарок — чтобы знать, есть ли что догрузить
 
 
 class ConfigOut(BaseModel):
