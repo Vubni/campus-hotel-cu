@@ -4,15 +4,20 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-TRACK_PATTERN = "^(dev|business|design|ai|undecided)$"
-SMOKING_PATTERN = "^(yes|no|vape)$"
-TIDINESS_PATTERN = "^(relaxed|medium|neat)$"
-WAKEUP_PATTERN = "^(alarm_one|alarm_many|natural)$"
-GUESTS_PATTERN = "^(often|sometimes|never)$"
-SHOWER_PATTERN = "^(morning|evening|any)$"
-TEMPERATURE_PATTERN = "^(cool|medium|warm)$"
-NOISE_PATTERN = "^(quiet|headphones|loud)$"
-ALCOHOL_PATTERN = "^(no|sometimes|often)$"
+# Пустая строка = «не выбрано». Так честнее, чем подставлять выдуманное
+# значение: пока человек не ответил, характеристику просто не показываем.
+UNSET = ""
+
+TRACK_PATTERN = "^(dev|business|design|ai|undecided|)$"
+SMOKING_PATTERN = "^(yes|no|vape|)$"
+TIDINESS_PATTERN = "^(relaxed|medium|neat|)$"
+WAKEUP_PATTERN = "^(alarm_one|alarm_many|natural|)$"
+GUESTS_PATTERN = "^(often|sometimes|never|)$"
+SHOWER_PATTERN = "^(morning|evening|any|)$"
+TEMPERATURE_PATTERN = "^(cool|medium|warm|)$"
+NOISE_PATTERN = "^(quiet|headphones|loud|)$"
+ALCOHOL_PATTERN = "^(no|sometimes|often|)$"
+SLEEP_PATTERN = "^(lark|owl|any|)$"
 
 COOKING_VALUES = ("self", "together", "delivery")
 # Для фильтра: одно значение из списка готовки.
@@ -22,7 +27,7 @@ COOKING_ITEM_PATTERN = "^(self|together|delivery)$"
 def normalize_cooking(value) -> List[str]:
     """Готовка допускает несколько вариантов. Принимаем список или строку
     через запятую (как хранится в БД), чистим от мусора и дублей.
-    Пустой выбор недопустим — тогда возвращаем ['self'].
+    Пустой список — «не выбрано», это допустимо.
     """
     if value is None:
         items = []
@@ -37,7 +42,7 @@ def normalize_cooking(value) -> List[str]:
         key = str(item).strip()
         if key in COOKING_VALUES and key not in result:
             result.append(key)
-    return result or ["self"]
+    return result
 
 
 class ProfileBase(BaseModel):
@@ -46,24 +51,26 @@ class ProfileBase(BaseModel):
     photo_url: str = Field("", max_length=500)
     telegram: str = Field(..., min_length=1, max_length=80)
 
-    # Направление вместо факультета: фиксированный список из пяти.
-    track: str = Field("undecided", pattern=TRACK_PATTERN)
-    course: int = Field(1, ge=1, le=6)
+    # Ниже "" везде значит «не выбрано» — характеристику просто не показываем,
+    # вместо того чтобы врать значением по умолчанию.
+    track: str = Field(UNSET, pattern=TRACK_PATTERN)
+    course: Optional[int] = Field(None, ge=1, le=6)
     bio: str = ""
 
     # None — «не предпочтительно»: подойдёт комната любого размера.
     room_capacity: Optional[int] = Field(None, ge=2, le=4)
-    sleep_schedule: str = Field("any", pattern="^(lark|owl|any)$")
-    smoking: str = Field("no", pattern=SMOKING_PATTERN)
-    tidiness: str = Field("medium", pattern=TIDINESS_PATTERN)
-    wakeup: str = Field("alarm_one", pattern=WAKEUP_PATTERN)
+    sleep_schedule: str = Field(UNSET, pattern=SLEEP_PATTERN)
+    smoking: str = Field(UNSET, pattern=SMOKING_PATTERN)
+    tidiness: str = Field(UNSET, pattern=TIDINESS_PATTERN)
+    wakeup: str = Field(UNSET, pattern=WAKEUP_PATTERN)
     # Несколько вариантов готовки; хранится строкой через запятую, наружу — список.
-    cooking: List[str] = Field(default_factory=lambda: ["self"])
-    guests: str = Field("sometimes", pattern=GUESTS_PATTERN)
-    shower: str = Field("any", pattern=SHOWER_PATTERN)
-    temperature: str = Field("medium", pattern=TEMPERATURE_PATTERN)
-    noise: str = Field("headphones", pattern=NOISE_PATTERN)
-    alcohol: str = Field("sometimes", pattern=ALCOHOL_PATTERN)
+    # Пустой список — «не выбрано».
+    cooking: List[str] = Field(default_factory=list)
+    guests: str = Field(UNSET, pattern=GUESTS_PATTERN)
+    shower: str = Field(UNSET, pattern=SHOWER_PATTERN)
+    temperature: str = Field(UNSET, pattern=TEMPERATURE_PATTERN)
+    noise: str = Field(UNSET, pattern=NOISE_PATTERN)
+    alcohol: str = Field(UNSET, pattern=ALCOHOL_PATTERN)
 
     @field_validator("cooking", mode="before")
     @classmethod
@@ -107,22 +114,22 @@ class GroupMemberOut(BaseModel):
     name: str
     photo_url: str = ""
     telegram: str
-    track: str = "undecided"
+    track: str = UNSET
     telegram_verified: bool = False
 
-    course: int = 1
+    course: Optional[int] = None
     bio: str = ""
     room_capacity: Optional[int] = None
-    sleep_schedule: str = "any"
-    smoking: str = "no"
-    tidiness: str = "medium"
-    wakeup: str = "alarm_one"
-    cooking: List[str] = Field(default_factory=lambda: ["self"])
-    guests: str = "sometimes"
-    shower: str = "any"
-    temperature: str = "medium"
-    noise: str = "headphones"
-    alcohol: str = "sometimes"
+    sleep_schedule: str = UNSET
+    smoking: str = UNSET
+    tidiness: str = UNSET
+    wakeup: str = UNSET
+    cooking: List[str] = Field(default_factory=list)
+    guests: str = UNSET
+    shower: str = UNSET
+    temperature: str = UNSET
+    noise: str = UNSET
+    alcohol: str = UNSET
 
     @field_validator("cooking", mode="before")
     @classmethod
@@ -175,6 +182,39 @@ class JoinRequestCreate(BaseModel):
 class JoinRequestVoteIn(BaseModel):
     profile_id: int  # кто голосует (должен быть в комнате)
     approve: bool
+
+
+class GroupInviteCreate(BaseModel):
+    """«Давай жить вместе» из ленты анкет."""
+
+    from_profile_id: int
+    to_profile_id: int
+    capacity: int = Field(..., ge=2, le=4)
+
+
+class GroupInviteRespond(BaseModel):
+    profile_id: int  # кто отвечает (должен быть приглашённым)
+    accept: bool
+
+
+class GroupInviteOut(BaseModel):
+    id: int
+    from_profile_id: int
+    to_profile_id: int
+    capacity: int
+    status: str
+    created_at: datetime
+    from_profile: GroupMemberOut
+    to_profile: GroupMemberOut
+
+    class Config:
+        from_attributes = True
+
+
+class BotInviteRespond(BaseModel):
+    telegram_id: int
+    invite_id: int
+    accept: bool
 
 
 class TelegramWidgetAuth(BaseModel):

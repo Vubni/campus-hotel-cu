@@ -20,6 +20,27 @@ BOT_SECRET = os.getenv("BOT_SECRET", "").strip()
 # Адрес сайта — подставляем в ссылки внутри сообщений бота.
 SITE_URL = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
 
+
+def allowed_origins() -> list[str]:
+    """Origin'ы, которым браузер разрешит читать ответы API.
+
+    ВАЖНО: это НЕ защита API. CORS проверяет только браузер — curl, скрипты и
+    боты его игнорируют. Настоящая проверка личности — подпись Telegram
+    (см. telegram_auth), CORS лишь мешает чужому сайту дёргать наш API из JS.
+
+    По умолчанию — домен сайта из SITE_URL плюс локальная разработка.
+    CORS_ORIGINS (через запятую) переопределяет список целиком.
+    """
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if raw:
+        return [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+    origins = {SITE_URL}
+    # Вите-дев и прод-контейнер на localhost — чтобы не ломать разработку.
+    origins.update(
+        ["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173"]
+    )
+    return sorted(origins)
+
 # Прокси до api.telegram.org и CDN Telegram — нужен там, где Telegram
 # заблокирован. Формат: http://user:pass@host:port или socks5://user:pass@host:port.
 # Пусто — ходим напрямую. Тот же прокси используется ботом.

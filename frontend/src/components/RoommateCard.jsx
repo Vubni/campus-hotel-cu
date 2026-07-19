@@ -5,7 +5,13 @@ function initials(name) {
   return name.trim().charAt(0).toUpperCase();
 }
 
-export default function RoommateCard({ profile }) {
+export default function RoommateCard({
+  profile,
+  myProfile,
+  invite,
+  onInvite,
+  busy,
+}) {
   const {
     name,
     gender,
@@ -17,6 +23,18 @@ export default function RoommateCard({ profile }) {
     room_capacity,
     telegram_verified,
   } = profile;
+
+  // Звать можно, только если у меня есть анкета, я свободен, он свободен и это
+  // не я сам. Приглашение уже отправлено — показываем статус вместо кнопок.
+  const canInvite =
+    myProfile &&
+    myProfile.id !== profile.id &&
+    !myProfile.group_id &&
+    !profile.group_id &&
+    !invite &&
+    typeof onInvite === "function";
+  // Человек указал размер комнаты — предлагаем только его; не указал — все.
+  const capacities = room_capacity ? [room_capacity] : [2, 3, 4];
 
   return (
     <article className="card">
@@ -45,11 +63,14 @@ export default function RoommateCard({ profile }) {
             <span className="card__gender">{GENDER[gender]}</span>
           </h3>
 
-          <p className="card__faculty">
-            {[TRACK[track], course ? `${course} курс` : null]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
+          {/* Ничего не выбрано — строку не рисуем, иначе остаётся пустой отступ. */}
+          {(TRACK[track] || course) && (
+            <p className="card__faculty">
+              {[TRACK[track], course ? `${course} курс` : null]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
 
           <span className="card__room">{roomLabel(room_capacity)}</span>
         </div>
@@ -58,6 +79,32 @@ export default function RoommateCard({ profile }) {
       {bio && <p className="card__bio">{bio}</p>}
 
       <ProfileSpecs profile={profile} />
+
+      {/* Позвать жить вместе прямо отсюда, не уходя во вкладку «Компании».
+          Размер комнаты берём из предпочтения человека; не выбрал — даём все. */}
+      {canInvite && (
+        <div className="card__invite">
+          <span className="card__invite-label">Позвать жить вместе:</span>
+          <div className="card__invite-btns">
+            {capacities.map((n) => (
+              <button
+                key={n}
+                className="card__invite-btn"
+                onClick={() => onInvite(profile.id, n)}
+                disabled={busy}
+              >
+                на {n}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {invite && (
+        <p className="card__invite-sent">
+          ⏳ Приглашение на {invite.capacity} отправлено — ждём ответа в Telegram
+        </p>
+      )}
 
       <a
         className="card__tg"

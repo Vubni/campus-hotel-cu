@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import {
   cancelRequest,
   createGroup,
+  createInvite,
   fetchGroupRequests,
   fetchGroups,
+  fetchMyInvites,
   fetchMyRequests,
+  respondInvite,
   fetchProfiles,
   leaveGroup,
   requestJoin,
@@ -51,13 +54,15 @@ export default function App() {
   // Заявки в мою комнату (id заявки → голосуем) и мои исходящие заявки.
   const [incoming, setIncoming] = useState([]);
   const [myRequests, setMyRequests] = useState([]);
+  // Мои исходящие приглашения «давай жить вместе» — чтобы не звать дважды.
+  const [myInvites, setMyInvites] = useState([]);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // null | "create" | "edit"
   const [busy, setBusy] = useState(false);
 
-  const { myProfile, remember, forget, reloadMe } = useMyProfile();
+  const { myProfile, loadingMe, remember, forget, reloadMe } = useMyProfile();
 
   function chooseGender(value) {
     localStorage.setItem(GENDER_KEY, value);
@@ -91,15 +96,18 @@ export default function App() {
     if (!me) {
       setIncoming([]);
       setMyRequests([]);
+      setMyInvites([]);
       return;
     }
     try {
-      const [mine, inbox] = await Promise.all([
+      const [mine, inbox, invites] = await Promise.all([
         fetchMyRequests(me.id),
         me.group_id ? fetchGroupRequests(me.group_id) : Promise.resolve([]),
+        fetchMyInvites(me.id),
       ]);
       setMyRequests(mine);
       setIncoming(inbox);
+      setMyInvites(invites);
     } catch {
       // Заявки — не критично: лента должна работать и без них.
       setIncoming([]);
@@ -174,10 +182,22 @@ export default function App() {
   const handleCreateGroup = (capacity) =>
     withBusy(() => createGroup(capacity, myProfile.id));
 
+  // Позвать жить вместе: комната появится только когда человек согласится.
+  const handleInvite = (toProfileId, capacity) =>
+    withBusy(() => createInvite(myProfile.id, toProfileId, capacity));
+
+  const handleRespondInvite = (inviteId, accept) =>
+    withBusy(() => respondInvite(inviteId, myProfile.id, accept));
+
   if (!gender) {
     return <GenderGate onSelect={chooseGender} />;
   }
 
+  // Приглашения ко мне — их надо показать в самом приложении: бот доходит
+  // только до тех, кто нажимал /start.
+  const incomingInvites = myInvites.filter(
+    (i) => i.to_profile_id === myProfile?.id
+  );
   const openGroups = groups.filter((g) => g.spots_left > 0);
   const canStartGroup = myProfile && !myProfile.group_id;
   // Пусто из-за фильтров или тут вообще никого нет — это разные сообщения.
@@ -238,6 +258,23 @@ export default function App() {
           </p>
         </div>
 
+        {/* Без анкеты человека не видно и он не может ничего сделать, а кнопку
+            в шапке замечали не с первого раза — зовём крупно и по делу. */}
+        {!loadingMe && !myProfile && (
+          <div className="promo">
+            <div className="promo__text">
+              <strong className="promo__title">Тебя ещё никто не видит</strong>
+              <span className="promo__sub">
+                Размести анкету — иначе не получится ни написать, ни собрать
+                компанию. Это минута.
+              </span>
+            </div>
+            <button className="promo__btn" onClick={() => setModal("create")}>
+              Разместить анкету
+            </button>
+          </div>
+        )}
+
         <div className="tabs">
           <button
             className={`tabs__btn${tab === "singles" ? " tabs__btn--on" : ""}`}
@@ -254,6 +291,35 @@ export default function App() {
             <span className="tabs__badge">{groups.length}</span>
           </button>
         </div>
+
+        {incomingInvites.length > 0 && (
+          <div className="invites">
+            {incomingInvites.map((inv) => (
+              <div className="invite" key={inv.id}>
+                <span className="invite__text">
+                  🤝 <strong>{inv.from_profile.name}</strong> зовёт жить вместе —
+                  комната на {inv.capacity}
+                </span>
+                <div className="invite__actions">
+                  <button
+                    className="invite__yes"
+                    onClick={() => handleRespondInvite(inv.id, true)}
+                    disabled={busy}
+                  >
+                    Согласиться
+                  </button>
+                  <button
+                    className="invite__no"
+                    onClick={() => handleRespondInvite(inv.id, false)}
+                    disabled={busy}
+                  >
+                    Отказаться
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {tab === "singles" && (
           <Filters
@@ -285,7 +351,18 @@ export default function App() {
             ) : (
               <div className="grid">
                 {profiles.map((p) => (
-                  <RoommateCard key={p.id} profile={p} />
+                  <RoommateCard
+                    key={p.id}
+                    profile={p}
+                    myProfile={myProfile}
+                    invite={myInvites.find(
+                      (i) =>
+                        i.to_profile_id === p.id &&
+                        i.from_profile_id === myProfile?.id
+                    )}
+                    onInvite={handleInvite}
+                    busy={busy}
+                  />
                 ))}
               </div>
             )}

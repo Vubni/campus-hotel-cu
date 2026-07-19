@@ -64,33 +64,36 @@ class Profile(Base):
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=True)
     group = relationship("Group", back_populates="members")
 
-    # Направление: dev | business | design | ai | undecided
-    track = Column(String(20), nullable=False, default="undecided")
-    course = Column(Integer, nullable=False, default=1)  # курс, 1..6
+    # Ниже "" (и NULL у course/room_capacity) означает «не выбрано»: человек
+    # ещё не ответил, и мы не показываем характеристику вместо того, чтобы
+    # подставлять выдуманное значение.
+    # Направление: dev | business | design | ai | undecided | ""
+    track = Column(String(20), nullable=False, default="")
+    course = Column(Integer, nullable=True)  # курс 1..6, NULL — не выбран
     bio = Column(Text, nullable=False, default="")
 
     # 2, 3, 4 или NULL — «не предпочтительно», подойдёт любая комната.
     # Без default: SQLAlchemy подставляет его вместо None, и NULL было бы не задать.
     room_capacity = Column(Integer, nullable=True)
-    sleep_schedule = Column(String(20), nullable=False, default="any")  # "lark" | "owl" | "any"
-    smoking = Column(String(20), nullable=False, default="no")  # "yes" | "no" | "vape"
+    sleep_schedule = Column(String(20), nullable=False, default="")  # lark | owl | any
+    smoking = Column(String(20), nullable=False, default="")  # yes | no | vape
     # Аккуратность (бывшая «чистоплотность»): relaxed | medium | neat
-    tidiness = Column(String(20), nullable=False, default="medium")
+    tidiness = Column(String(20), nullable=False, default="")
     # Подъём утром: alarm_one (1 будильник) | alarm_many (10 будильников) | natural (само)
-    wakeup = Column(String(20), nullable=False, default="alarm_one")
+    wakeup = Column(String(20), nullable=False, default="")
     # Готовка: можно выбрать несколько из self | together | delivery.
-    # Храним как список значений через запятую ("self,together").
-    cooking = Column(String(60), nullable=False, default="self")
+    # Храним как список значений через запятую ("self,together"), "" — не выбрано.
+    cooking = Column(String(60), nullable=False, default="")
     # Гости: often (часто) | sometimes (иногда) | never (не зову)
-    guests = Column(String(20), nullable=False, default="sometimes")
+    guests = Column(String(20), nullable=False, default="")
     # Душ: morning (утром) | evening (вечером) | any (когда как)
-    shower = Column(String(20), nullable=False, default="any")
+    shower = Column(String(20), nullable=False, default="")
     # Температура в комнате: cool (прохладно) | medium (нормально) | warm (тепло)
-    temperature = Column(String(20), nullable=False, default="medium")
+    temperature = Column(String(20), nullable=False, default="")
     # Звук: quiet (тишина) | headphones (в наушниках) | loud (музыка вслух)
-    noise = Column(String(20), nullable=False, default="headphones")
+    noise = Column(String(20), nullable=False, default="")
     # Алкоголь: no (не пью) | sometimes (иногда) | often (часто)
-    alcohol = Column(String(20), nullable=False, default="sometimes")
+    alcohol = Column(String(20), nullable=False, default="")
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -121,6 +124,33 @@ class JoinRequest(Base):
     votes = relationship(
         "JoinRequestVote", back_populates="request", cascade="all, delete-orphan"
     )
+
+
+class GroupInvite(Base):
+    """Приглашение собрать компанию прямо из ленты анкет.
+
+    Комната НЕ создаётся в момент приглашения: пока позванный не согласится,
+    существует только запись-приглашение. Согласился — создаём группу и кладём
+    туда обоих.
+    """
+
+    __tablename__ = "group_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    from_profile_id = Column(
+        Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    to_profile_id = Column(
+        Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    capacity = Column(Integer, nullable=False, default=2)  # 2..4
+    # pending | accepted | declined | cancelled
+    status = Column(String(20), nullable=False, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    decided_at = Column(DateTime, nullable=True)
+
+    from_profile = relationship("Profile", foreign_keys=[from_profile_id])
+    to_profile = relationship("Profile", foreign_keys=[to_profile_id])
 
 
 class JoinRequestVote(Base):

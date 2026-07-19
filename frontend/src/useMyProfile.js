@@ -1,18 +1,37 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchProfile } from "./api.js";
+import { fetchMyProfileByTelegram, fetchProfile } from "./api.js";
+import { getInitData, isInsideTelegram } from "./telegram.js";
 
 const KEY = "obshaga_my_profile_id";
 
 /**
- * «Моя анкета» — id запоминается в браузере после её создания.
- * Полноценной авторизации нет, поэтому это единственный способ понять,
- * от чьего имени вступать в компанию и выходить из неё.
+ * «Моя анкета».
+ *
+ * Внутри Telegram личность определяет подпись initData — это надёжно и
+ * переживает смену устройства и очистку кэша. localStorage остаётся
+ * запасным вариантом для обычного браузера, где подписи нет.
  */
 export function useMyProfile() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
+    // 1) Мини-апп: спрашиваем сервер «кто я» по подписи Telegram.
+    if (isInsideTelegram()) {
+      try {
+        const mine = await fetchMyProfileByTelegram(getInitData());
+        localStorage.setItem(KEY, String(mine.id));
+        setProfile(mine);
+        return mine;
+      } catch {
+        // 404 — анкеты действительно нет. Пробуем localStorage ниже:
+        // анкету могли создать в браузере без входа через Telegram.
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // 2) Обычный браузер (или анкета без привязки к Telegram).
     const id = localStorage.getItem(KEY);
     if (!id) {
       setProfile(null);

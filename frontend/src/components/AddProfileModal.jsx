@@ -14,25 +14,26 @@ import TelegramLoginButton from "./TelegramLoginButton.jsx";
 
 const GENDER_WORD = { male: "Парень", female: "Девушка" };
 
-// Значения по умолчанию для новой анкеты.
+// Новая анкета начинается с «не выбрано»: пусть человек ответит сам, чем мы
+// припишем ему привычки, о которых он не говорил.
 const EMPTY_FORM = {
   name: "",
   photo_url: "",
   telegram: "",
-  track: "undecided",
-  course: 1,
+  track: "",
+  course: "",
   bio: "",
-  room_capacity: 2,
-  sleep_schedule: "any",
-  smoking: "no",
-  tidiness: "medium",
-  wakeup: "alarm_one",
-  cooking: ["self"], // можно выбрать несколько
-  guests: "sometimes",
-  shower: "any",
-  temperature: "medium",
-  noise: "headphones",
-  alcohol: "sometimes",
+  room_capacity: "",
+  sleep_schedule: "",
+  smoking: "",
+  tidiness: "",
+  wakeup: "",
+  cooking: [], // можно выбрать несколько; пустой список — не выбрано
+  guests: "",
+  shower: "",
+  temperature: "",
+  noise: "",
+  alcohol: "",
 };
 
 const COOKING_CHOICES = [
@@ -52,13 +53,13 @@ function formFromProfile(profile) {
       form[key] = profile[key];
     }
   }
-  // NULL на сервере = «не предпочтительно» — в селекте это пустая строка.
+  // NULL на сервере = «не выбрано» — в селекте это пустая строка.
   form.room_capacity = profile.room_capacity ?? "";
+  form.course = profile.course ?? "";
   // Готовка — всегда массив (на случай старых строковых данных).
   form.cooking = Array.isArray(profile.cooking)
     ? profile.cooking
     : [profile.cooking].filter(Boolean);
-  if (form.cooking.length === 0) form.cooking = ["self"];
   return form;
 }
 
@@ -91,11 +92,11 @@ export default function AddProfileModal({
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
-  // Готовка — множественный выбор: тумблим значение, но не даём убрать последнее.
+  // Готовка — множественный выбор. Снять можно всё: пустой список означает
+  // «не выбрано», и характеристика просто не показывается в анкете.
   function toggleCooking(value) {
     setForm((prev) => {
       const has = prev.cooking.includes(value);
-      if (has && prev.cooking.length === 1) return prev;
       const next = has
         ? prev.cooking.filter((c) => c !== value)
         : [...prev.cooking, value];
@@ -164,10 +165,10 @@ export default function AddProfileModal({
       const payload = {
         ...form,
         gender,
-        // "" — «не предпочтительно»: шлём null, иначе Number("") даст 0.
+        // "" — «не выбрано»: шлём null, иначе Number("") дал бы 0.
         room_capacity:
           form.room_capacity === "" ? null : Number(form.room_capacity),
-        course: Number(form.course),
+        course: form.course === "" ? null : Number(form.course),
         // Сервер перепроверит подпись и сам решит, ставить ли галочку.
         ...(tgAuth || {}),
       };
@@ -216,6 +217,7 @@ export default function AddProfileModal({
             <label className="field field--sm">
               <span>Курс</span>
               <select value={form.course} onChange={set("course")}>
+                <option value="">—</option>
                 {[1, 2, 3, 4, 5, 6].map((c) => (
                   <option key={c} value={c}>
                     {c}
@@ -280,6 +282,7 @@ export default function AddProfileModal({
           <label className="field">
             <span>Направление</span>
             <select value={form.track} onChange={set("track")}>
+              <option value="">Не выбрано</option>
               {TRACK_OPTIONS.map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -313,6 +316,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Режим сна</span>
               <select value={form.sleep_schedule} onChange={set("sleep_schedule")}>
+                <option value="">Не выбрано</option>
                 <option value="any">Без разницы</option>
                 <option value="lark">Жаворонок</option>
                 <option value="owl">Сова</option>
@@ -324,6 +328,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Курение</span>
               <select value={form.smoking} onChange={set("smoking")}>
+                <option value="">Не выбрано</option>
                 <option value="no">Не курю</option>
                 <option value="yes">Курю</option>
                 <option value="vape">Электронки</option>
@@ -332,6 +337,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Аккуратность</span>
               <select value={form.tidiness} onChange={set("tidiness")}>
+                <option value="">Не выбрано</option>
                 <option value="relaxed">Расслабленно</option>
                 <option value="medium">Умеренно</option>
                 <option value="neat">Аккуратно</option>
@@ -343,6 +349,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Подъём утром</span>
               <select value={form.wakeup} onChange={set("wakeup")}>
+                <option value="">Не выбрано</option>
                 <option value="alarm_one">Один будильник</option>
                 <option value="alarm_many">Десять будильников</option>
                 <option value="natural">Просыпаюсь сам</option>
@@ -351,6 +358,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Гости</span>
               <select value={form.guests} onChange={set("guests")}>
+                <option value="">Не выбрано</option>
                 <option value="often">Часто зову гостей</option>
                 <option value="sometimes">Иногда</option>
                 <option value="never">Не зову</option>
@@ -362,6 +370,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Душ</span>
               <select value={form.shower} onChange={set("shower")}>
+                <option value="">Не выбрано</option>
                 <option value="any">Когда как</option>
                 <option value="morning">Утром</option>
                 <option value="evening">Вечером</option>
@@ -370,6 +379,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Температура в комнате</span>
               <select value={form.temperature} onChange={set("temperature")}>
+                <option value="">Не выбрано</option>
                 <option value="cool">Прохладно</option>
                 <option value="medium">Нормально</option>
                 <option value="warm">Тепло</option>
@@ -381,6 +391,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Звук</span>
               <select value={form.noise} onChange={set("noise")}>
+                <option value="">Не выбрано</option>
                 <option value="quiet">Тишина</option>
                 <option value="headphones">Слушаю в наушниках</option>
                 <option value="loud">Музыка вслух</option>
@@ -389,6 +400,7 @@ export default function AddProfileModal({
             <label className="field">
               <span>Алкоголь</span>
               <select value={form.alcohol} onChange={set("alcohol")}>
+                <option value="">Не выбрано</option>
                 <option value="no">Не пью</option>
                 <option value="sometimes">Иногда</option>
                 <option value="often">Часто</option>

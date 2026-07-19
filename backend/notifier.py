@@ -63,6 +63,18 @@ async def send_message(
         return False
 
 
+def invite_keyboard(invite_id: int) -> dict:
+    """Кнопки под приглашением «давай жить вместе»."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "🤝 Согласен", "callback_data": f"invite:{invite_id}:yes"},
+                {"text": "✖️ Отказаться", "callback_data": f"invite:{invite_id}:no"},
+            ]
+        ]
+    }
+
+
 def vote_keyboard(request_id: int) -> dict:
     """Кнопки «Принять / Отклонить» под заявкой."""
     return {

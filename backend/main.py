@@ -29,11 +29,59 @@ app = FastAPI(title="Кампус-отель Диск — поиск сосед�
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ===== Авторизация по подписи Telegram =====
+# Все заходят через бота, поэтому в каждом запросе есть initData — строка,
+# подписанная токеном бота. Подделать её нельзя, так что это надёжнее любых
+# самодельных токенов. CORS такой роли не выполняет: его проверяет только
+# браузер, а curl и скрипты его игнорируют.
+
+
+def telegram_user(
+    x_telegram_init_data: Optional[str] = Header(None),
+) -> Optional[dict]:
+    """Проверенные данные Telegram из заголовка.
+
+    Возвращает None, если проверка выключена (нет токена бота) — иначе
+    локальная разработка и тесты стали бы невозможны.
+    """
+    if not config.TELEGRAM_BOT_TOKEN:
+        return None
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Нужен вход через Telegram")
+    try:
+        return telegram_auth.verify_webapp_init_data(x_telegram_init_data)
+    except telegram_auth.TelegramAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+
+def current_profile(
+    user: Optional[dict] = Depends(telegram_user),
+    db: Session = Depends(get_db),
+) -> Optional[models.Profile]:
+    """Анкета того, кто сейчас делает запрос (None — проверка выключена)."""
+    if user is None:
+        return None
+    return _find_profile_by_telegram(db, int(user["id"]), user.get("username"))
+
+
+def _assert_is_me(actor: Optional[models.Profile], profile_id: int) -> None:
+    """Запрещает действовать от чужого имени.
+
+    actor is None — токен бота не настроен, проверка отключена.
+    """
+    if actor is None:
+        return
+    if actor.id != profile_id:
+        raise HTTPException(
+            status_code=403, detail="Можно действовать только от своего имени"
+        )
 
 
 def ensure_columns() -> None:
@@ -114,16 +162,11 @@ def ensure_columns() -> None:
         )
         conn.execute(text("ALTER TABLE profiles ALTER COLUMN track SET NOT NULL"))
 
-        # Курс: раньше не собирался (колонка была nullable) — теперь всем по
-        # умолчанию 1-й, чтобы не остаться с NULL после включения NOT NULL.
+        # Курс. NULL = «не выбран»; принудительно ставить 1-й нельзя — это
+        # враньё в чужой анкете (см. блок «не выбрано» ниже).
         conn.execute(
             text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS course INTEGER")
         )
-        conn.execute(text("UPDATE profiles SET course = 1 WHERE course IS NULL"))
-        conn.execute(
-            text("ALTER TABLE profiles ALTER COLUMN course SET DEFAULT 1")
-        )
-        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course SET NOT NULL"))
 
         # Новые бытовые поля анкеты.
         for column, default in (
@@ -182,6 +225,63 @@ def ensure_columns() -> None:
                 )
             )
             conn.execute(text("ALTER TABLE profiles DROP COLUMN cleanliness"))
+
+        # ===== «Не выбрано» вместо выдуманных значений =====
+        # Идёт последним: к этому моменту все колонки точно существуют.
+        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course DROP NOT NULL"))
+        conn.execute(text("ALTER TABLE profiles ALTER COLUMN course DROP DEFAULT"))
+        for column in (
+            "track",
+            "sleep_schedule",
+            "smoking",
+            "tidiness",
+            "wakeup",
+            "cooking",
+            "guests",
+            "shower",
+            "temperature",
+            "noise",
+            "alcohol",
+        ):
+            conn.execute(
+                text(f"ALTER TABLE profiles ALTER COLUMN {column} SET DEFAULT ''")
+            )
+
+        # Одноразовый сброс. Эти поля раньше проставлялись дефолтом всем подряд
+        # («один будильник», «готовит сам»…), хотя человек их не выбирал — в
+        # чужих анкетах появлялась неправда. Чистим ровно один раз: маркер в
+        # schema_meta не даёт затереть уже осознанно заполненные анкеты.
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS schema_meta ("
+                "key VARCHAR(80) PRIMARY KEY, applied_at TIMESTAMP DEFAULT now())"
+            )
+        )
+        already = conn.execute(
+            text("SELECT 1 FROM schema_meta WHERE key = 'reset_fabricated_defaults'")
+        ).first()
+        if not already:
+            conn.execute(
+                text(
+                    """
+                    UPDATE profiles SET
+                        course = NULL,
+                        wakeup = '',
+                        cooking = '',
+                        guests = '',
+                        shower = '',
+                        temperature = '',
+                        noise = '',
+                        alcohol = ''
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO schema_meta (key) "
+                    "VALUES ('reset_fabricated_defaults')"
+                )
+            )
 
 
 @app.on_event("startup")
@@ -271,7 +371,11 @@ async def auth_telegram_webapp(payload: schemas.TelegramWebAppAuth):
     return await _telegram_profile(user)
 
 
-@app.get("/api/profiles", response_model=List[schemas.ProfileOut])
+@app.get(
+    "/api/profiles",
+    response_model=List[schemas.ProfileOut],
+    dependencies=[Depends(telegram_user)],
+)
 def list_profiles(
     db: Session = Depends(get_db),
     gender: Optional[str] = Query(None, pattern="^(male|female|other)$"),
@@ -344,7 +448,39 @@ def list_profiles(
     return query.order_by(models.Profile.created_at.desc()).all()
 
 
-@app.get("/api/profiles/{profile_id}", response_model=schemas.ProfileOut)
+@app.post("/api/profiles/me", response_model=schemas.ProfileOut)
+def resolve_my_profile(
+    payload: schemas.TelegramWebAppAuth, db: Session = Depends(get_db)
+):
+    """«Кто я» по подписи Telegram.
+
+    Мини-апп зовёт это при старте: localStorage может быть пуст (другое
+    устройство, очистка кэша), а анкета при этом уже есть — раньше в такой
+    ситуации предлагалось создать вторую.
+    """
+    try:
+        user = telegram_auth.verify_webapp_init_data(payload.init_data)
+    except telegram_auth.TelegramAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    profile = _find_profile_by_telegram(db, int(user["id"]), user.get("username"))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Анкета не найдена")
+
+    # Анкету могли создать до входа через Telegram — привязываем id сейчас,
+    # чтобы дальше находить её даже при смене ника.
+    if not profile.telegram_id:
+        profile.telegram_id = int(user["id"])
+        db.commit()
+        db.refresh(profile)
+    return profile
+
+
+@app.get(
+    "/api/profiles/{profile_id}",
+    response_model=schemas.ProfileOut,
+    dependencies=[Depends(telegram_user)],
+)
 def get_profile(profile_id: int, db: Session = Depends(get_db)):
     profile = db.query(models.Profile).filter(models.Profile.id == profile_id).first()
     if not profile:
@@ -394,6 +530,7 @@ def update_profile(
     profile_id: int,
     payload: schemas.ProfileUpdate,
     db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
     """Редактирование своей анкеты.
 
@@ -401,6 +538,7 @@ def update_profile(
     Пол не трогаем (он влияет на подбор компании), а подтверждённый через
     Telegram ник менять нельзя — иначе подтверждение потеряет смысл.
     """
+    _assert_is_me(actor, profile_id)
     profile = _get_profile_or_404(db, profile_id)
     data = payload.model_dump()
 
@@ -426,8 +564,10 @@ def delete_profile(
     profile_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
     """Удаление своей анкеты: заодно выводим из компании и чистим заявки."""
+    _assert_is_me(actor, profile_id)
     profile = _get_profile_or_404(db, profile_id)
 
     group = profile.group if profile.group_id else None
@@ -621,7 +761,11 @@ def _apply_vote(
     return status, msgs
 
 
-@app.get("/api/groups", response_model=List[schemas.GroupOut])
+@app.get(
+    "/api/groups",
+    response_model=List[schemas.GroupOut],
+    dependencies=[Depends(telegram_user)],
+)
 def list_groups(
     db: Session = Depends(get_db),
     gender: Optional[str] = Query(None, pattern="^(male|female|other)$"),
@@ -636,14 +780,23 @@ def list_groups(
     return groups
 
 
-@app.get("/api/groups/{group_id}", response_model=schemas.GroupOut)
+@app.get(
+    "/api/groups/{group_id}",
+    response_model=schemas.GroupOut,
+    dependencies=[Depends(telegram_user)],
+)
 def get_group(group_id: int, db: Session = Depends(get_db)):
     return _get_group_or_404(db, group_id)
 
 
 @app.post("/api/groups", response_model=schemas.GroupOut, status_code=201)
-def create_group(payload: schemas.GroupCreate, db: Session = Depends(get_db)):
+def create_group(
+    payload: schemas.GroupCreate,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
     """Создаёт компанию: автор сразу становится первым участником."""
+    _assert_is_me(actor, payload.profile_id)
     profile = _get_profile_or_404(db, payload.profile_id)
     if profile.group_id:
         raise HTTPException(status_code=409, detail="Ты уже состоишь в компании")
@@ -676,8 +829,12 @@ def list_group_requests(
     group_id: int,
     db: Session = Depends(get_db),
     status: Optional[str] = Query("pending"),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
     group = _get_group_or_404(db, group_id)
+    # Заявки — внутреннее дело комнаты: чужим их видеть незачем.
+    if actor is not None and actor.group_id != group.id:
+        raise HTTPException(status_code=403, detail="Это не твоя комната")
     reqs = [r for r in group.requests if not status or r.status == status]
     reqs.sort(key=lambda r: r.created_at)
     return [_request_out(r) for r in reqs]
@@ -690,7 +847,9 @@ def list_my_requests(
     profile_id: int,
     db: Session = Depends(get_db),
     status: Optional[str] = Query("pending"),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
+    _assert_is_me(actor, profile_id)
     _get_profile_or_404(db, profile_id)
     query = db.query(models.JoinRequest).filter(
         models.JoinRequest.profile_id == profile_id
@@ -710,8 +869,10 @@ def create_join_request(
     payload: schemas.JoinRequestCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
     """Заявка на вступление. Сама по себе в комнату не пускает."""
+    _assert_is_me(actor, payload.profile_id)
     group = _get_group_or_404(db, group_id)
     profile = _get_profile_or_404(db, payload.profile_id)
 
@@ -753,7 +914,9 @@ def vote_request(
     payload: schemas.JoinRequestVoteIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
+    _assert_is_me(actor, payload.profile_id)
     req = _get_request_or_404(db, request_id)
     voter = _get_profile_or_404(db, payload.profile_id)
 
@@ -772,8 +935,12 @@ def vote_request(
 
 @app.post("/api/requests/{request_id}/cancel", status_code=204)
 def cancel_request(
-    request_id: int, payload: schemas.GroupMembership, db: Session = Depends(get_db)
+    request_id: int,
+    payload: schemas.GroupMembership,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
+    _assert_is_me(actor, payload.profile_id)
     req = _get_request_or_404(db, request_id)
     if req.profile_id != payload.profile_id:
         raise HTTPException(status_code=403, detail="Это не твоя заявка")
@@ -791,7 +958,9 @@ def leave_group(
     payload: schemas.GroupMembership,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
 ):
+    _assert_is_me(actor, payload.profile_id)
     group = _get_group_or_404(db, group_id)
     profile = _get_profile_or_404(db, payload.profile_id)
     if profile.group_id != group.id:
@@ -832,6 +1001,211 @@ def leave_group(
     db.commit()
 
     background_tasks.add_task(notifier.deliver, msgs)
+    return None
+
+
+# ===== Приглашения «давай жить вместе» =====
+
+
+def _get_invite_or_404(db: Session, invite_id: int) -> models.GroupInvite:
+    invite = (
+        db.query(models.GroupInvite)
+        .filter(models.GroupInvite.id == invite_id)
+        .first()
+    )
+    if not invite:
+        raise HTTPException(status_code=404, detail="Приглашение не найдено")
+    return invite
+
+
+def _invite_msgs(invite: models.GroupInvite) -> List[dict]:
+    """Зовём приглашённого подтвердить — кнопками прямо в Telegram."""
+    target = invite.to_profile
+    if not target.telegram_chat_id:
+        return []
+    return [
+        _msg(
+            target.telegram_chat_id,
+            f"🤝 <b>{_who(invite.from_profile)}</b> зовёт тебя жить вместе — "
+            f"комната на {invite.capacity}.\n"
+            f"@{invite.from_profile.telegram}\n\n"
+            "Комната появится, только если ты согласишься.",
+            notifier.invite_keyboard(invite.id),
+        )
+    ]
+
+
+def _accept_invite(
+    db: Session, invite: models.GroupInvite
+) -> tuple[models.Group, List[dict]]:
+    """Согласие: создаём комнату и заводим туда обоих."""
+    author, target = invite.from_profile, invite.to_profile
+
+    group = models.Group(capacity=invite.capacity, gender=author.gender)
+    db.add(group)
+    db.flush()  # нужен id до привязки участников
+    author.group_id = group.id
+    target.group_id = group.id
+
+    invite.status = "accepted"
+    invite.decided_at = datetime.utcnow()
+
+    # Оба определились — их прочие заявки и приглашения теряют смысл.
+    for profile in (author, target):
+        db.query(models.JoinRequest).filter(
+            models.JoinRequest.profile_id == profile.id,
+            models.JoinRequest.status == join_flow.PENDING,
+        ).update({"status": join_flow.CANCELLED, "decided_at": datetime.utcnow()})
+        db.query(models.GroupInvite).filter(
+            models.GroupInvite.id != invite.id,
+            models.GroupInvite.status == "pending",
+            (models.GroupInvite.from_profile_id == profile.id)
+            | (models.GroupInvite.to_profile_id == profile.id),
+        ).update({"status": "cancelled", "decided_at": datetime.utcnow()})
+
+    msgs: List[dict] = []
+    if author.telegram_chat_id:
+        msgs.append(
+            _msg(
+                author.telegram_chat_id,
+                f"🎉 <b>{target.name}</b> согласи(лся/лась) жить с тобой!\n"
+                f"Комната на {invite.capacity} создана: {config.SITE_URL}",
+            )
+        )
+    db.commit()
+    db.refresh(group)
+    return group, msgs
+
+
+def _decline_invite(db: Session, invite: models.GroupInvite) -> List[dict]:
+    invite.status = "declined"
+    invite.decided_at = datetime.utcnow()
+    author = invite.from_profile
+    msgs: List[dict] = []
+    if author.telegram_chat_id:
+        msgs.append(
+            _msg(
+                author.telegram_chat_id,
+                f"😔 <b>{invite.to_profile.name}</b> отказал(а)ся жить вместе. "
+                f"Есть и другие варианты: {config.SITE_URL}",
+            )
+        )
+    db.commit()
+    return msgs
+
+
+@app.post("/api/invites", response_model=schemas.GroupInviteOut, status_code=201)
+def create_invite(
+    payload: schemas.GroupInviteCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    """Позвать человека жить вместе. Комната создастся только после согласия."""
+    _assert_is_me(actor, payload.from_profile_id)
+    author = _get_profile_or_404(db, payload.from_profile_id)
+    target = _get_profile_or_404(db, payload.to_profile_id)
+
+    if author.id == target.id:
+        raise HTTPException(status_code=400, detail="Нельзя позвать самого себя")
+    if author.gender != target.gender:
+        raise HTTPException(
+            status_code=403, detail="Парни живут с парнями, девушки — с девушками"
+        )
+    if author.group_id:
+        raise HTTPException(status_code=409, detail="Ты уже состоишь в компании")
+    if target.group_id:
+        raise HTTPException(status_code=409, detail="Человек уже в компании")
+
+    existing = (
+        db.query(models.GroupInvite)
+        .filter(
+            models.GroupInvite.from_profile_id == author.id,
+            models.GroupInvite.to_profile_id == target.id,
+            models.GroupInvite.status == "pending",
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Приглашение уже отправлено")
+
+    invite = models.GroupInvite(
+        from_profile_id=author.id,
+        to_profile_id=target.id,
+        capacity=payload.capacity,
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+
+    background_tasks.add_task(notifier.deliver, _invite_msgs(invite))
+    return invite
+
+
+@app.get("/api/profiles/{profile_id}/invites", response_model=List[schemas.GroupInviteOut])
+def list_my_invites(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    status: Optional[str] = Query("pending"),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    """Приглашения, где человек участвует — и как звавший, и как позванный."""
+    _assert_is_me(actor, profile_id)
+    _get_profile_or_404(db, profile_id)
+    query = db.query(models.GroupInvite).filter(
+        (models.GroupInvite.from_profile_id == profile_id)
+        | (models.GroupInvite.to_profile_id == profile_id)
+    )
+    if status:
+        query = query.filter(models.GroupInvite.status == status)
+    return query.order_by(models.GroupInvite.created_at.desc()).all()
+
+
+@app.post("/api/invites/{invite_id}/respond", response_model=schemas.GroupInviteOut)
+def respond_invite(
+    invite_id: int,
+    payload: schemas.GroupInviteRespond,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    _assert_is_me(actor, payload.profile_id)
+    invite = _get_invite_or_404(db, invite_id)
+    if invite.status != "pending":
+        raise HTTPException(status_code=409, detail="Приглашение уже закрыто")
+    if invite.to_profile_id != payload.profile_id:
+        raise HTTPException(status_code=403, detail="Это приглашение не тебе")
+
+    if payload.accept:
+        if invite.from_profile.group_id or invite.to_profile.group_id:
+            raise HTTPException(
+                status_code=409, detail="Кто-то из вас уже успел вступить в компанию"
+            )
+        _group, msgs = _accept_invite(db, invite)
+    else:
+        msgs = _decline_invite(db, invite)
+
+    background_tasks.add_task(notifier.deliver, msgs)
+    db.refresh(invite)
+    return invite
+
+
+@app.post("/api/invites/{invite_id}/cancel", status_code=204)
+def cancel_invite(
+    invite_id: int,
+    payload: schemas.GroupMembership,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    _assert_is_me(actor, payload.profile_id)
+    invite = _get_invite_or_404(db, invite_id)
+    if invite.from_profile_id != payload.profile_id:
+        raise HTTPException(status_code=403, detail="Это не твоё приглашение")
+    if invite.status != "pending":
+        raise HTTPException(status_code=409, detail="Приглашение уже закрыто")
+    invite.status = "cancelled"
+    invite.decided_at = datetime.utcnow()
+    db.commit()
     return None
 
 
@@ -950,6 +1324,42 @@ def bot_vote(
         "votes_done": join_flow.votes_done(req),
         "votes_needed": join_flow.votes_needed(req),
         "who": req.profile.name,
+    }
+
+
+@app.post("/api/bot/invite", dependencies=[Depends(_check_bot_secret)])
+def bot_invite_respond(
+    payload: schemas.BotInviteRespond,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Ответ на приглашение «давай жить вместе» кнопкой в боте."""
+    profile = _find_profile_by_telegram(db, payload.telegram_id, None)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Анкета не найдена")
+
+    invite = _get_invite_or_404(db, payload.invite_id)
+    if invite.status != "pending":
+        raise HTTPException(status_code=409, detail="Приглашение уже закрыто")
+    if invite.to_profile_id != profile.id:
+        raise HTTPException(status_code=403, detail="Это приглашение не тебе")
+
+    if payload.accept:
+        if invite.from_profile.group_id or invite.to_profile.group_id:
+            raise HTTPException(
+                status_code=409, detail="Кто-то из вас уже успел вступить в компанию"
+            )
+        _group, msgs = _accept_invite(db, invite)
+        result = "accepted"
+    else:
+        msgs = _decline_invite(db, invite)
+        result = "declined"
+
+    background_tasks.add_task(notifier.deliver, msgs)
+    return {
+        "status": result,
+        "capacity": invite.capacity,
+        "who": invite.from_profile.name,
     }
 
 

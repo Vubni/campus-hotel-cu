@@ -6,11 +6,15 @@ import { SPECS } from "../labels.js";
  * сливались в кашу, особенно на телефоне.
  */
 export default function ProfileSpecs({ profile }) {
+  // Анкета, где ничего не выбрано, не должна оставлять пустую рамку с
+  // разделителями — в этом случае блока просто нет.
+  const filled = SPECS.filter(([, , read]) => read(profile));
+  if (filled.length === 0) return null;
+
   return (
     <dl className="specs">
-      {SPECS.map(([icon, label, read]) => {
+      {filled.map(([icon, label, read]) => {
         const value = read(profile);
-        if (!value) return null; // старые анкеты без поля — просто пропускаем
         return (
           <div className="spec" key={label}>
             <span className="spec__icon" aria-hidden="true">

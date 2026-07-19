@@ -1,4 +1,21 @@
+import { getInitData } from "./telegram.js";
+
 const BASE = "/api";
+
+/**
+ * Подпись Telegram в каждом запросе.
+ *
+ * Это и есть авторизация: initData подписан токеном бота, подделать его
+ * нельзя, и сервер по нему понимает, кто именно действует. Пусто (обычный
+ * браузер) — сервер ответит 401, если у него настроен токен бота.
+ */
+function authHeaders(extra = {}) {
+  const initData = getInitData();
+  return initData ? { ...extra, "X-Telegram-Init-Data": initData } : { ...extra };
+}
+
+const JSON_HEADERS = () => authHeaders({ "Content-Type": "application/json" });
+
 
 export async function fetchProfiles(filters = {}) {
   const params = new URLSearchParams();
@@ -8,7 +25,9 @@ export async function fetchProfiles(filters = {}) {
     }
   }
   const qs = params.toString();
-  const res = await fetch(`${BASE}/profiles${qs ? `?${qs}` : ""}`);
+  const res = await fetch(`${BASE}/profiles${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error("Не удалось загрузить профили");
   return res.json();
 }
@@ -29,14 +48,16 @@ export async function fetchGroups(filters = {}) {
     }
   }
   const qs = params.toString();
-  const res = await fetch(`${BASE}/groups${qs ? `?${qs}` : ""}`);
+  const res = await fetch(`${BASE}/groups${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
   return jsonOrThrow(res, "Не удалось загрузить компании");
 }
 
 export async function createGroup(capacity, profileId) {
   const res = await fetch(`${BASE}/groups`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify({ capacity, profile_id: profileId }),
   });
   return jsonOrThrow(res, "Не удалось создать компанию");
@@ -46,26 +67,26 @@ export async function createGroup(capacity, profileId) {
 export async function requestJoin(groupId, profileId) {
   const res = await fetch(`${BASE}/groups/${groupId}/requests`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify({ profile_id: profileId }),
   });
   return jsonOrThrow(res, "Не удалось отправить заявку");
 }
 
 export async function fetchGroupRequests(groupId) {
-  const res = await fetch(`${BASE}/groups/${groupId}/requests?status=pending`);
+  const res = await fetch(`${BASE}/groups/${groupId}/requests?status=pending`, { headers: authHeaders() });
   return jsonOrThrow(res, "Не удалось загрузить заявки");
 }
 
 export async function fetchMyRequests(profileId) {
-  const res = await fetch(`${BASE}/profiles/${profileId}/requests?status=pending`);
+  const res = await fetch(`${BASE}/profiles/${profileId}/requests?status=pending`, { headers: authHeaders() });
   return jsonOrThrow(res, "Не удалось загрузить заявки");
 }
 
 export async function voteRequest(requestId, profileId, approve) {
   const res = await fetch(`${BASE}/requests/${requestId}/vote`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify({ profile_id: profileId, approve }),
   });
   return jsonOrThrow(res, "Не удалось проголосовать");
@@ -74,7 +95,7 @@ export async function voteRequest(requestId, profileId, approve) {
 export async function cancelRequest(requestId, profileId) {
   const res = await fetch(`${BASE}/requests/${requestId}/cancel`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify({ profile_id: profileId }),
   });
   return jsonOrThrow(res, "Не удалось отменить заявку");
@@ -83,19 +104,57 @@ export async function cancelRequest(requestId, profileId) {
 export async function leaveGroup(groupId, profileId) {
   const res = await fetch(`${BASE}/groups/${groupId}/leave`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify({ profile_id: profileId }),
   });
   return jsonOrThrow(res, "Не удалось выйти из компании");
 }
 
+/** Найти свою анкету по подписи Telegram — не полагаясь на localStorage. */
+export async function fetchMyProfileByTelegram(initData) {
+  const res = await fetch(`${BASE}/profiles/me`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ init_data: initData }),
+  });
+  return jsonOrThrow(res, "Анкета не найдена");
+}
+
+// «Давай жить вместе» — комната создаётся только после согласия приглашённого.
+export async function createInvite(fromProfileId, toProfileId, capacity) {
+  const res = await fetch(`${BASE}/invites`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({
+      from_profile_id: fromProfileId,
+      to_profile_id: toProfileId,
+      capacity,
+    }),
+  });
+  return jsonOrThrow(res, "Не удалось отправить приглашение");
+}
+
+export async function fetchMyInvites(profileId) {
+  const res = await fetch(`${BASE}/profiles/${profileId}/invites?status=pending`, { headers: authHeaders() });
+  return jsonOrThrow(res, "Не удалось загрузить приглашения");
+}
+
+export async function respondInvite(inviteId, profileId, accept) {
+  const res = await fetch(`${BASE}/invites/${inviteId}/respond`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ profile_id: profileId, accept }),
+  });
+  return jsonOrThrow(res, "Не удалось ответить на приглашение");
+}
+
 export async function fetchProfile(id) {
-  const res = await fetch(`${BASE}/profiles/${id}`);
+  const res = await fetch(`${BASE}/profiles/${id}`, { headers: authHeaders() });
   return jsonOrThrow(res, "Анкета не найдена");
 }
 
 export async function fetchConfig() {
-  const res = await fetch(`${BASE}/config`);
+  const res = await fetch(`${BASE}/config`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Не удалось загрузить настройки");
   return res.json();
 }
@@ -103,7 +162,11 @@ export async function fetchConfig() {
 export async function uploadPhoto(file) {
   const body = new FormData();
   body.append("file", file);
-  const res = await fetch(`${BASE}/uploads/photo`, { method: "POST", body });
+  const res = await fetch(`${BASE}/uploads/photo`, {
+    method: "POST",
+    headers: authHeaders(),
+    body,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Не удалось загрузить фото");
@@ -115,7 +178,7 @@ export async function uploadPhoto(file) {
 export async function authTelegram(widgetUser) {
   const res = await fetch(`${BASE}/auth/telegram`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify(widgetUser),
   });
   if (!res.ok) {
@@ -129,7 +192,7 @@ export async function authTelegram(widgetUser) {
 export async function authTelegramWebApp(initData) {
   const res = await fetch(`${BASE}/auth/telegram/webapp`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify({ init_data: initData }),
   });
   if (!res.ok) {
@@ -142,7 +205,7 @@ export async function authTelegramWebApp(initData) {
 export async function createProfile(profile) {
   const res = await fetch(`${BASE}/profiles`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify(profile),
   });
   if (!res.ok) {
@@ -155,13 +218,16 @@ export async function createProfile(profile) {
 export async function updateProfile(id, profile) {
   const res = await fetch(`${BASE}/profiles/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS(),
     body: JSON.stringify(profile),
   });
   return jsonOrThrow(res, "Не удалось сохранить анкету");
 }
 
 export async function deleteProfile(id) {
-  const res = await fetch(`${BASE}/profiles/${id}`, { method: "DELETE" });
+  const res = await fetch(`${BASE}/profiles/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   return jsonOrThrow(res, "Не удалось удалить анкету");
 }

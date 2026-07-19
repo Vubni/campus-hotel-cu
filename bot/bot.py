@@ -117,6 +117,43 @@ async def cmd_pending(message: Message):
         )
 
 
+@dp.callback_query(F.data.startswith("invite:"))
+async def on_invite(call: CallbackQuery):
+    """«Давай жить вместе»: комната создаётся только по согласию."""
+    _, invite_id, decision = call.data.split(":")
+    accept = decision == "yes"
+
+    async with api_client() as client:
+        try:
+            resp = await client.post(
+                "/api/bot/invite",
+                json={
+                    "telegram_id": call.from_user.id,
+                    "invite_id": int(invite_id),
+                    "accept": accept,
+                },
+            )
+        except httpx.HTTPError:
+            await call.answer("Сайт недоступен, попробуй позже", show_alert=True)
+            return
+
+    if resp.status_code != 200:
+        detail = resp.json().get("detail", "Не получилось")
+        await call.answer(detail, show_alert=True)
+        if resp.status_code == 409:
+            await call.message.edit_reply_markup(reply_markup=None)
+        return
+
+    data = resp.json()
+    if data["status"] == "accepted":
+        tail = f"🤝 Готово — комната на {data['capacity']} создана."
+    else:
+        tail = "✖️ Ты отказал(а)ся."
+
+    await call.answer("Готово")
+    await call.message.edit_text(f"{call.message.html_text}\n\n{tail}")
+
+
 @dp.callback_query(F.data.startswith("vote:"))
 async def on_vote(call: CallbackQuery):
     _, request_id, decision = call.data.split(":")
