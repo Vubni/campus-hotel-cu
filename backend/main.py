@@ -364,8 +364,16 @@ def on_startup():
 
 
 @app.get("/api/config", response_model=schemas.ConfigOut)
-def get_config(user: Optional[dict] = Depends(optional_telegram_user)):
+def get_config(
+    response: Response, user: Optional[dict] = Depends(optional_telegram_user)
+):
     """Фронтенд спрашивает, показывать ли кнопку входа через Telegram."""
+    # Ответ зависит от подписи в заголовке, поэтому кэшировать его нельзя.
+    # Иначе браузер или WebView Telegram переиспользует ответ, полученный по
+    # другой подписи (или вовсе без неё) — и админ не увидит свою кнопку.
+    # Vary тут не спасает: заголовок нестандартный, а промежуточные кэши
+    # ключуются по URL.
+    response.headers["Cache-Control"] = "no-store"
     return schemas.ConfigOut(
         telegram_enabled=config.telegram_enabled(),
         telegram_bot_username=config.TELEGRAM_BOT_USERNAME or None,
@@ -1597,8 +1605,10 @@ def bot_invite_respond(
     response_model=schemas.AdminStatsOut,
     dependencies=[Depends(require_admin)],
 )
-def admin_stats(db: Session = Depends(get_db)):
+def admin_stats(response: Response, db: Session = Depends(get_db)):
     """Сводка перед выгрузкой: сколько всего и сколько с кем можно связаться."""
+    # Чужие персональные данные не должны осесть в кэше браузера.
+    response.headers["Cache-Control"] = "no-store"
     profiles = db.query(models.Profile).all()
     groups = db.query(models.Group).all()
 
@@ -1684,7 +1694,10 @@ async def download_export(  # имя не admin_export: так звался бы
     return Response(
         content=body,
         media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
     )
 
 
