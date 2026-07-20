@@ -1,5 +1,25 @@
 export const GENDER = { male: "М", female: "Ж", other: "Другое" };
 
+// Кампус-отели. Отличаются размерами комнат: в «Облаке» на четверых не селят.
+// Держим в одном месте — то же самое продублировано на бэке в campuses.py.
+export const DEFAULT_CAMPUS = "disk";
+export const CAMPUS = { disk: "Диск", cloud: "Облако" };
+const CAMPUS_CAPACITIES = { disk: [2, 3, 4], cloud: [2, 3] };
+
+/** Какие комнаты бывают в этом кампус-отеле: [2, 3, 4] или [2, 3]. */
+export function campusCapacities(campus) {
+  return CAMPUS_CAPACITIES[campus] || CAMPUS_CAPACITIES[DEFAULT_CAMPUS];
+}
+
+/** «2–4» / «2–3» — для подписей вроде «Комнаты на 2–3 человека». */
+export function campusRoomsText(campus) {
+  const sizes = campusCapacities(campus);
+  return `${sizes[0]}–${sizes[sizes.length - 1]}`;
+}
+
+// На бакалавриате всего 4 курса — столько и предлагаем.
+export const COURSES = [1, 2, 3, 4];
+
 // Направление вместо факультета — пять фиксированных вариантов.
 export const TRACK = {
   dev: "Разработка",

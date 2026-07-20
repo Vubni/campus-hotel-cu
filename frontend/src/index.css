@@ -255,6 +255,42 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+/* Кнопка админки — только у владельцев, поэтому неброская. */
+.header__admin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+.header__admin:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.header__admin-icon {
+  display: none;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Кампус-отель при наличии анкеты не переключается здесь — это метка, не кнопка. */
+.header__campus {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
 .header__cta {
   background: var(--solid-bg);
   color: var(--solid-text);
@@ -1144,6 +1180,52 @@ a.gmember:hover {
   padding: 6px 0;
 }
 
+/* ===== Размер комнаты: сузить или расширить уже собранную компанию ===== */
+.gcard__resize {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.gcard__resize-label {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.gcard__resize-btns {
+  display: flex;
+  gap: 6px;
+}
+.gcard__resize-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+.gcard__resize-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.gcard__resize-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Текущий размер — не «недоступен», а выбран: показываем это заливкой.
+   Идёт после :disabled — та же специфичность, побеждает последнее правило. */
+.gcard__resize-btn--on,
+.gcard__resize-btn--on:disabled {
+  background: var(--solid-bg);
+  border-color: var(--solid-bg);
+  color: var(--solid-text);
+  opacity: 1;
+}
+
 /* ===== Заявки на вступление ===== */
 .gcard__requests {
   border-top: 1px solid var(--border);
@@ -1475,6 +1557,98 @@ a.gmember:hover {
   color: #dc2626;
   font-size: 14px;
 }
+
+/* ===== Админка ===== */
+.modal--admin {
+  max-width: 620px;
+}
+.admin__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+.admin__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.admin__stat b {
+  font-size: 20px;
+  font-weight: 800;
+}
+.admin__stat span {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.admin__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+.admin__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 13px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.admin__choice b {
+  font-size: 14px;
+  font-weight: 700;
+}
+.admin__choice span {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+.admin__choice:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.admin__choice--on {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.admin__choice--action b {
+  color: var(--accent);
+}
+.admin__choice:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.admin__note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.admin__done {
+  font-size: 14px;
+  font-weight: 700;
+  color: #16a34a;
+}
+/* Предупреждение о последствиях — заметное, но не пугающее красным. */
+.modal__warn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
 .modal__submit {
   background: var(--solid-bg);
   color: var(--solid-text);
@@ -1613,8 +1787,17 @@ a.gmember:hover {
     gap: 7px;
     flex-shrink: 0;
   }
-  .header__gender {
+  .header__gender,
+  .header__campus,
+  .header__admin {
     padding: 9px 12px;
+  }
+  /* В тесной шапке админка сжимается до шестерёнки. */
+  .header__admin-full {
+    display: none;
+  }
+  .header__admin-icon {
+    display: inline;
   }
   .header__gender-change {
     display: none;
@@ -1764,7 +1947,9 @@ a.gmember:hover {
 
 /* ===== Узкие телефоны ===== */
 @media (max-width: 400px) {
-  .header__gender {
+  /* Общага и пол видны в подзаголовке — в тесной шапке их можно убрать. */
+  .header__gender,
+  .header__campus {
     display: none;
   }
   .header__cta-short {

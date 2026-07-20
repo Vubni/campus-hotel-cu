@@ -1,6 +1,7 @@
 import ThemeToggle from "./ThemeToggle.jsx";
+import { CAMPUS } from "../labels.js";
 
-export default function GenderGate({ onSelect }) {
+export default function GenderGate({ campus, onSelect }) {
   return (
     <div className="gate">
       <div className="gate__theme">
@@ -9,7 +10,7 @@ export default function GenderGate({ onSelect }) {
       <div className="gate__inner">
         <div className="gate__brand">
           <span className="gate__logo">🏠</span>
-          Кампус-отель Диск
+          Кампус-отель {CAMPUS[campus] || ""}
         </div>
 
         <h1 className="gate__title">

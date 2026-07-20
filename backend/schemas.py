@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+import campuses
+
 
 # Пустая строка = «не выбрано». Так честнее, чем подставлять выдуманное
 # значение: пока человек не ответил, характеристику просто не показываем.
@@ -48,13 +50,16 @@ def normalize_cooking(value) -> List[str]:
 class ProfileBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     gender: str = Field(..., pattern="^(male|female|other)$")
+    # Кампус-отель. Значение по умолчанию — для анкет, созданных до его появления.
+    campus: str = Field(campuses.DEFAULT, pattern=campuses.PATTERN)
     photo_url: str = Field("", max_length=500)
     telegram: str = Field(..., min_length=1, max_length=80)
 
     # Ниже "" везде значит «не выбрано» — характеристику просто не показываем,
     # вместо того чтобы врать значением по умолчанию.
     track: str = Field(UNSET, pattern=TRACK_PATTERN)
-    course: int = Field(1, ge=1, le=6)  # варианта «не выбрано» нет
+    # На бакалавриате всего 4 курса. Варианта «не выбрано» нет.
+    course: int = Field(1, ge=1, le=4)
     bio: str = ""
 
     # None — «не предпочтительно»: подойдёт комната любого размера.
@@ -144,6 +149,7 @@ class GroupOut(BaseModel):
     id: int
     capacity: int
     gender: str
+    campus: str = campuses.DEFAULT
     created_at: datetime
     members: List[GroupMemberOut] = []
     spots_left: int
@@ -159,6 +165,17 @@ class GroupCreate(BaseModel):
 
 class GroupMembership(BaseModel):
     profile_id: int
+
+
+class GroupCapacityIn(BaseModel):
+    """Изменение размера уже созданной комнаты.
+
+    Верхнюю границу задаёт кампус-отель, нижнюю — те, кто уже въехал: меньше
+    числа участников комнату не ужать.
+    """
+
+    profile_id: int  # кто меняет (должен быть в комнате)
+    capacity: int = Field(..., ge=2, le=4)
 
 
 class JoinRequestOut(BaseModel):
@@ -280,3 +297,15 @@ class ConfigOut(BaseModel):
     telegram_enabled: bool
     telegram_bot_username: Optional[str] = None
     max_upload_bytes: int
+    is_admin: bool = False
+
+
+class AdminStatsOut(BaseModel):
+    """Что показать в админке до выгрузки — чтобы понимать объём."""
+
+    profiles: int
+    with_username: int  # у скольких известен ник (по нему и пишут)
+    with_bot: int  # сколько нажали /start — до них дойдут уведомления
+    groups: int
+    in_groups: int  # сколько человек уже живут в компаниях
+    by_campus: Dict[str, int]

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   cancelRequest,
+  changeGroupCapacity,
   createGroup,
   createInvite,
+  fetchConfig,
   fetchGroupRequests,
   fetchGroups,
   fetchMyInvites,
@@ -17,12 +19,16 @@ import RoommateCard from "./components/RoommateCard.jsx";
 import GroupCard from "./components/GroupCard.jsx";
 import Filters from "./components/Filters.jsx";
 import AddProfileModal from "./components/AddProfileModal.jsx";
+import AdminPanel from "./components/AdminPanel.jsx";
 import GenderGate from "./components/GenderGate.jsx";
+import CampusGate from "./components/CampusGate.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
+import { CAMPUS, campusCapacities, campusRoomsText } from "./labels.js";
 import { initWebApp } from "./telegram.js";
 import { useMyProfile } from "./useMyProfile.js";
 
 const GENDER_KEY = "obshaga_gender";
+const CAMPUS_KEY = "obshaga_campus";
 
 const EMPTY_FILTERS = {
   search: "",
@@ -47,6 +53,11 @@ export default function App() {
   const [gender, setGender] = useState(
     () => localStorage.getItem(GENDER_KEY) || ""
   );
+  // Кампус-отель. Пока анкеты нет — выбор с первого экрана, дальше главной
+  // остаётся анкета: там его и меняют, отсюда мы значение только подхватываем.
+  const [campus, setCampus] = useState(
+    () => localStorage.getItem(CAMPUS_KEY) || ""
+  );
   const [tab, setTab] = useState("singles"); // "singles" | "groups"
 
   const [profiles, setProfiles] = useState([]);
@@ -59,8 +70,10 @@ export default function App() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [modal, setModal] = useState(null); // null | "create" | "edit"
+  const [modal, setModal] = useState(null); // null | "create" | "edit" | "admin"
   const [busy, setBusy] = useState(false);
+  // Админка своя только у владельцев — решает сервер по подписи Telegram.
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const { myProfile, loadingMe, remember, forget, reloadMe } = useMyProfile();
 
@@ -69,7 +82,18 @@ export default function App() {
     setGender(value);
   }
 
-  async function load(currentFilters, currentGender) {
+  function chooseCampus(value) {
+    localStorage.setItem(CAMPUS_KEY, value);
+    setCampus(value);
+  }
+
+  /** Вернуться к выбору кампус-отеля. Только пока анкеты нет: дальше решает она. */
+  function resetCampus() {
+    localStorage.removeItem(CAMPUS_KEY);
+    setCampus("");
+  }
+
+  async function load(currentFilters, currentGender, currentCampus) {
     setLoading(true);
     setError("");
     try {
@@ -78,9 +102,10 @@ export default function App() {
         fetchProfiles({
           ...currentFilters,
           gender: currentGender,
+          campus: currentCampus,
           without_group: true,
         }),
-        fetchGroups({ gender: currentGender }),
+        fetchGroups({ gender: currentGender, campus: currentCampus }),
       ]);
       setProfiles(people);
       setGroups(companies);
@@ -117,13 +142,34 @@ export default function App() {
   // Если сайт открыт внутри Telegram — разворачиваем окно Mini App.
   useEffect(() => {
     initWebApp();
+    fetchConfig()
+      .then((cfg) => setIsAdmin(Boolean(cfg.is_admin)))
+      .catch(() => setIsAdmin(false));
   }, []);
 
   useEffect(() => {
-    if (!gender) return;
-    const id = setTimeout(() => load(filters, gender), 250);
+    if (!gender || !campus) return;
+    const id = setTimeout(() => load(filters, gender, campus), 250);
     return () => clearTimeout(id);
-  }, [filters, gender]);
+  }, [filters, gender, campus]);
+
+  // Анкета — источник правды про кампус-отель: сменили его в анкете (или зашли с
+  // другого устройства) — лента должна переехать следом.
+  useEffect(() => {
+    if (myProfile?.campus && myProfile.campus !== campus) {
+      chooseCampus(myProfile.campus);
+    }
+  }, [myProfile, campus]);
+
+  // Фильтр «комната на 4» пережил переезд в «Облако» — там таких нет, и лента
+  // молча оказалась бы пустой. Сбрасываем сами.
+  useEffect(() => {
+    if (!campus || !filters.room_capacity) return;
+    const allowed = campusCapacities(campus).map(String);
+    if (!allowed.includes(String(filters.room_capacity))) {
+      setFilters((prev) => ({ ...prev, room_capacity: "" }));
+    }
+  }, [campus, filters.room_capacity]);
 
   function handleCreated(profile) {
     setModal(null);
@@ -150,7 +196,10 @@ export default function App() {
   }, [myProfile]);
 
   async function refresh() {
-    const [, me] = await Promise.all([load(filters, gender), reloadMe()]);
+    const [, me] = await Promise.all([
+      load(filters, gender, campus),
+      reloadMe(),
+    ]);
     await loadRequests(me || myProfile);
   }
 
@@ -182,6 +231,10 @@ export default function App() {
   const handleCreateGroup = (capacity) =>
     withBusy(() => createGroup(capacity, myProfile.id));
 
+  // Комнату можно сузить и расширить: собрались на 4, а набралось двое.
+  const handleChangeCapacity = (groupId, capacity) =>
+    withBusy(() => changeGroupCapacity(groupId, myProfile.id, capacity));
+
   // Позвать жить вместе: комната появится только когда человек согласится.
   const handleInvite = (toProfileId, capacity) =>
     withBusy(() => createInvite(myProfile.id, toProfileId, capacity));
@@ -189,8 +242,13 @@ export default function App() {
   const handleRespondInvite = (inviteId, accept) =>
     withBusy(() => respondInvite(inviteId, myProfile.id, accept));
 
+  // Кампус-отель определяет и ленту, и размеры комнат — спрашиваем его первым.
+  if (!campus) {
+    return <CampusGate onSelect={chooseCampus} />;
+  }
+
   if (!gender) {
-    return <GenderGate onSelect={chooseGender} />;
+    return <GenderGate campus={campus} onSelect={chooseGender} />;
   }
 
   // Приглашения ко мне — их надо показать в самом приложении: бот доходит
@@ -200,6 +258,7 @@ export default function App() {
   );
   const openGroups = groups.filter((g) => g.spots_left > 0);
   const canStartGroup = myProfile && !myProfile.group_id;
+  const capacities = campusCapacities(campus);
   // Пусто из-за фильтров или тут вообще никого нет — это разные сообщения.
   const filtersActive = Object.values(filters).some((v) => v !== "");
 
@@ -210,13 +269,45 @@ export default function App() {
           <div className="header__brand">
             <span className="header__logo">🏠</span>
             <div>
-              <h1>Кампус-отель Диск</h1>
+              <h1>Кампус-отель {CAMPUS[campus]}</h1>
               <p>Найди соседа по комнате</p>
             </div>
           </div>
 
           <div className="header__right">
             <ThemeToggle compact />
+            {isAdmin && (
+              <button
+                className="header__admin"
+                onClick={() => setModal("admin")}
+                title="Выгрузка данных"
+              >
+                <span className="header__admin-full">Админка</span>
+                <span className="header__admin-icon" aria-hidden="true">
+                  ⚙
+                </span>
+              </button>
+            )}
+            {/* Пока анкеты нет, отель можно перевыбрать здесь. С анкетой
+                она хранится в ней — и меняется только там, чтобы случайное
+                нажатие не выкинуло человека из компании. */}
+            {myProfile ? (
+              <span
+                className="header__campus"
+                title="Сменить кампус-отель можно в анкете"
+              >
+                {CAMPUS[campus]}
+              </span>
+            ) : (
+              <button
+                className="header__gender"
+                onClick={resetCampus}
+                title="Сменить"
+              >
+                {CAMPUS[campus]}
+                <span className="header__gender-change">сменить</span>
+              </button>
+            )}
             <button
               className="header__gender"
               onClick={() => setGender("")}
@@ -254,7 +345,9 @@ export default function App() {
             Соседи, с которыми <span className="accent">по пути</span>
           </h2>
           <p className="hero__sub">
-            Комнаты на 2–4 человека · только {GENDER_WORD[gender].toLowerCase()}
+            Кампус-отель «{CAMPUS[campus]}» · комнаты на{" "}
+            {campusRoomsText(campus)} человека · только{" "}
+            {GENDER_WORD[gender].toLowerCase()}
           </p>
         </div>
 
@@ -324,6 +417,7 @@ export default function App() {
         {tab === "singles" && (
           <Filters
             filters={filters}
+            campus={campus}
             onChange={setFilters}
             onReset={() => setFilters(EMPTY_FILTERS)}
           />
@@ -355,6 +449,7 @@ export default function App() {
                     key={p.id}
                     profile={p}
                     myProfile={myProfile}
+                    capacities={capacities}
                     invite={myInvites.find(
                       (i) =>
                         i.to_profile_id === p.id &&
@@ -379,7 +474,7 @@ export default function App() {
               {canStartGroup && (
                 <div className="groups__new">
                   <span>Договорились с кем-то? Создай компанию:</span>
-                  {[2, 3, 4].map((capacity) => (
+                  {capacities.map((capacity) => (
                     <button
                       key={capacity}
                       className="groups__new-btn"
@@ -417,6 +512,8 @@ export default function App() {
                     onCancelRequest={handleCancelRequest}
                     onVote={handleVote}
                     onLeave={handleLeave}
+                    onChangeCapacity={handleChangeCapacity}
+                    capacities={capacities}
                     busy={busy}
                   />
                 ))}
@@ -427,12 +524,15 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        Кампус-отель Диск · сервис поиска соседей по комнате в общежитии
+        Кампус-отели Диск и Облако · сервис поиска соседей по комнате
       </footer>
 
-      {modal && (
+      {modal === "admin" && <AdminPanel onClose={() => setModal(null)} />}
+
+      {(modal === "create" || modal === "edit") && (
         <AddProfileModal
           gender={gender}
+          campus={campus}
           profile={modal === "edit" ? myProfile : null}
           onClose={() => setModal(null)}
           onCreated={handleCreated}

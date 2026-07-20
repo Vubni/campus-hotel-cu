@@ -25,9 +25,14 @@ class Group(Base):
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True, index=True)
-    capacity = Column(Integer, nullable=False, default=3)  # 2..4
+    # Сколько человек в комнате. Допустимые значения зависят от кампус-отеля:
+    # в «Диске» 2–4, в «Облаке» 2–3 (см. campuses.py). Меняется и после
+    # создания — компания на 4 может ужаться до 2, если больше не набралось.
+    capacity = Column(Integer, nullable=False, default=3)
     # Пол компании: парни живут с парнями, девушки — с девушками.
     gender = Column(String(20), nullable=False)
+    # Кампус-отель: disk | cloud. Комнаты разных отелей не смешиваются.
+    campus = Column(String(20), nullable=False, default="disk")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     members = relationship("Profile", back_populates="group")
@@ -49,6 +54,8 @@ class Profile(Base):
     # nullable, чтобы не терять уже введённые данные и легко вернуть поля.
     age = Column(Integer, nullable=True)
     gender = Column(String(20), nullable=False)  # "male" | "female" | "other"
+    # Кампус-отель: disk | cloud. Видно только тех, кто выбрал тот же самый.
+    campus = Column(String(20), nullable=False, default="disk")
     # Либо /api/media/<file>.jpg (загруженное фото или скачанный аватар),
     # либо внешняя ссылка у старых записей.
     photo_url = Column(String(500), nullable=False, default="")
@@ -69,7 +76,7 @@ class Profile(Base):
     # подставлять выдуманное значение.
     # Направление: dev | business | design | ai | undecided | ""
     track = Column(String(20), nullable=False, default="")
-    course = Column(Integer, nullable=False, default=1)  # курс 1..6, по умолчанию 1
+    course = Column(Integer, nullable=False, default=1)  # курс 1..4, по умолчанию 1
     bio = Column(Text, nullable=False, default="")
 
     # 2, 3, 4 или NULL — «не предпочтительно», подойдёт любая комната.

@@ -9,7 +9,13 @@ import {
   updateProfile,
 } from "../api.js";
 import { getInitData, isInsideTelegram } from "../telegram.js";
-import { TRACK_OPTIONS } from "../labels.js";
+import {
+  CAMPUS,
+  COURSES,
+  DEFAULT_CAMPUS,
+  TRACK_OPTIONS,
+  campusCapacities,
+} from "../labels.js";
 import PhotoPicker from "./PhotoPicker.jsx";
 import TelegramLoginButton from "./TelegramLoginButton.jsx";
 
@@ -21,6 +27,7 @@ const EMPTY_FORM = {
   name: "",
   photo_url: "",
   telegram: "",
+  campus: DEFAULT_CAMPUS, // подменяется на выбранный в приложении кампус-отель
   track: "",
   course: 1, // варианта «не выбрано» нет — по умолчанию 1 курс
   bio: "",
@@ -69,6 +76,7 @@ function formFromProfile(profile) {
 
 export default function AddProfileModal({
   gender,
+  campus = DEFAULT_CAMPUS,
   profile = null,
   onClose,
   onCreated,
@@ -83,7 +91,7 @@ export default function AddProfileModal({
   const insideTelegram = isInsideTelegram();
 
   const [form, setForm] = useState(() =>
-    isEdit ? formFromProfile(profile) : { ...EMPTY_FORM }
+    isEdit ? formFromProfile(profile) : { ...EMPTY_FORM, campus }
   );
   // Анкета уже подтверждена через Telegram (в режиме редактирования).
   const [verified, setVerified] = useState(
@@ -99,6 +107,24 @@ export default function AddProfileModal({
   const [deleting, setDeleting] = useState(false);
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+
+  /**
+   * Смена кампус-отеля. В «Облаке» комнат на четверых нет, поэтому предпочтение,
+   * которого там не бывает, сбрасываем — иначе сервер отказал бы при сохранении.
+   */
+  function changeCampus(e) {
+    const next = e.target.value;
+    setForm((prev) => {
+      const allowed = campusCapacities(next).map(String);
+      return {
+        ...prev,
+        campus: next,
+        room_capacity: allowed.includes(String(prev.room_capacity))
+          ? prev.room_capacity
+          : "",
+      };
+    });
+  }
 
   // Готовка — множественный выбор. Снять можно всё: пустой список означает
   // «не выбрано», и характеристика просто не показывается в анкете.
@@ -249,9 +275,22 @@ export default function AddProfileModal({
             <label className="field field--sm">
               <span>Курс</span>
               <select value={form.course} onChange={set("course")}>
-                {[1, 2, 3, 4, 5, 6].map((c) => (
+                {COURSES.map((c) => (
                   <option key={c} value={c}>
                     {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="field-row">
+            <label className="field">
+              <span>Кампус-отель</span>
+              <select value={form.campus} onChange={changeCampus}>
+                {Object.entries(CAMPUS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
                   </option>
                 ))}
               </select>
@@ -262,17 +301,31 @@ export default function AddProfileModal({
             </label>
           </div>
 
-          <label className="field">
-            <span>Telegram * (без @)</span>
-            <input
-              required
-              value={form.telegram}
-              onChange={set("telegram")}
-              placeholder="username"
-              disabled={tgConfirmed}
-              readOnly={tgConfirmed}
-            />
-          </label>
+          {/* Переезд рвёт все связи в старом отеле — предупреждаем заранее,
+              а не показываем результат постфактум. */}
+          {isEdit && form.campus !== profile.campus && (
+            <p className="modal__warn">
+              Смена кампус-отеля — это переезд:{" "}
+              {profile.group_id
+                ? "ты выйдешь из своей компании, а заявки и приглашения закроются."
+                : "твои заявки и приглашения закроются."}
+            </p>
+          )}
+
+          {/* Ник спрашиваем, только если Telegram его не подтвердил. Внутри
+              мини-аппа он подтягивается сам, и поле «введи свой ник» было
+              лишним вопросом с заранее известным ответом. */}
+          {!tgConfirmed && (
+            <label className="field">
+              <span>Telegram * (без @)</span>
+              <input
+                required
+                value={form.telegram}
+                onChange={set("telegram")}
+                placeholder="username"
+              />
+            </label>
+          )}
 
           <div className="field">
             <span>Фото</span>
@@ -383,9 +436,11 @@ export default function AddProfileModal({
               <span>Комната на</span>
               <select value={form.room_capacity} onChange={set("room_capacity")}>
                 <option value="">Не предпочтительно</option>
-                <option value={2}>2 человека</option>
-                <option value={3}>3 человека</option>
-                <option value={4}>4 человека</option>
+                {campusCapacities(form.campus).map((n) => (
+                  <option key={n} value={n}>
+                    {n} человека
+                  </option>
+                ))}
               </select>
             </label>
             <label className="field">

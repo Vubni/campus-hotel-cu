@@ -113,6 +113,8 @@ export default function GroupCard({
   onCancelRequest,
   onVote,
   onLeave,
+  onChangeCapacity,
+  capacities = [2, 3, 4],
   busy,
 }) {
   const { id, capacity, members, spots_left } = group;
@@ -182,6 +184,35 @@ export default function GroupCard({
               busy={busy}
             />
           ))}
+        </div>
+      )}
+
+      {/* Планы меняются: собирались вчетвером, а набралось двое — комнату
+          можно ужать, не распуская компанию. Меньше, чем вас уже есть, —
+          нельзя, поэтому такие размеры недоступны. */}
+      {iAmMember && typeof onChangeCapacity === "function" && (
+        <div className="gcard__resize">
+          <span className="gcard__resize-label">Размер комнаты:</span>
+          <div className="gcard__resize-btns">
+            {capacities.map((n) => (
+              <button
+                key={n}
+                className={`gcard__resize-btn${
+                  n === capacity ? " gcard__resize-btn--on" : ""
+                }`}
+                onClick={() => onChangeCapacity(id, n)}
+                disabled={busy || n === capacity || n < members.length}
+                title={
+                  n < members.length
+                    ? `Вас уже ${members.length} — не поместитесь`
+                    : `Сделать комнатой на ${n}`
+                }
+                aria-pressed={n === capacity}
+              >
+                на {n}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

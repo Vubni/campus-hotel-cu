@@ -21,6 +21,29 @@ BOT_SECRET = os.getenv("BOT_SECRET", "").strip()
 SITE_URL = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
 
 
+# Владельцы сервиса. Держим прямо здесь, чтобы админка работала сразу после
+# развёртывания, без лишней переменной окружения. ADMIN_TELEGRAM_IDS (через
+# запятую) заменяет этот список целиком — например, чтобы отозвать доступ.
+DEFAULT_ADMIN_TELEGRAM_IDS = {716452039, 442325979}
+
+
+def admin_telegram_ids() -> set[int]:
+    """Кому доступна админка — Telegram ID через запятую.
+
+    Личность подтверждается подписью Telegram, поэтому знание чужого ID
+    ничего не даёт: подделать initData без токена бота нельзя.
+    """
+    raw = os.getenv("ADMIN_TELEGRAM_IDS", "").strip()
+    if not raw:
+        return set(DEFAULT_ADMIN_TELEGRAM_IDS)
+    return {
+        int(item.strip()) for item in raw.split(",") if item.strip().isdigit()
+    }
+
+
+ADMIN_TELEGRAM_IDS = admin_telegram_ids()
+
+
 def allowed_origins() -> list[str]:
     """Origin'ы, которым браузер разрешит читать ответы API.
 

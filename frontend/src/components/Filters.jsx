@@ -1,23 +1,12 @@
-import { useState } from "react";
-import { TRACK_OPTIONS } from "../labels.js";
+import { useMemo, useState } from "react";
+import { COURSES, TRACK_OPTIONS, campusCapacities } from "../labels.js";
 
 // [ключ фильтра, подпись «любой», [[значение, подпись], …]]
+// Размер комнаты подставляется отдельно: он зависит от кампус-отеля.
 const FILTER_SELECTS = [
   ["track", "Направление", TRACK_OPTIONS],
-  [
-    "course",
-    "Курс",
-    [1, 2, 3, 4, 5, 6].map((c) => [String(c), `${c} курс`]),
-  ],
-  [
-    "room_capacity",
-    "Комната",
-    [
-      ["2", "2 человека"],
-      ["3", "3 человека"],
-      ["4", "4 человека"],
-    ],
-  ],
+  ["course", "Курс", COURSES.map((c) => [String(c), `${c} курс`])],
+  ["room_capacity", "Комната", []],
   [
     "sleep_schedule",
     "Режим сна",
@@ -110,10 +99,25 @@ const FILTER_SELECTS = [
   ],
 ];
 
-export default function Filters({ filters, onChange, onReset }) {
+export default function Filters({ filters, campus, onChange, onReset }) {
   // Фильтров стало много — прячем их за кнопку, чтобы не занимали пол-экрана.
   const [open, setOpen] = useState(false);
   const set = (key) => (e) => onChange({ ...filters, [key]: e.target.value });
+
+  // Комнаты на 4 предлагаем искать только там, где они есть.
+  const selects = useMemo(
+    () =>
+      FILTER_SELECTS.map((item) =>
+        item[0] === "room_capacity"
+          ? [
+              item[0],
+              item[1],
+              campusCapacities(campus).map((n) => [String(n), `${n} человека`]),
+            ]
+          : item
+      ),
+    [campus]
+  );
 
   // Поиск всегда на виду, поэтому в счётчик активных фильтров его не считаем.
   const activeCount = FILTER_SELECTS.filter(
@@ -146,7 +150,7 @@ export default function Filters({ filters, onChange, onReset }) {
 
       {open && (
         <div className="filters__panel">
-          {FILTER_SELECTS.map(([key, anyLabel, options]) => (
+          {selects.map(([key, anyLabel, options]) => (
             <select key={key} value={filters[key]} onChange={set(key)}>
               <option value="">{anyLabel}</option>
               {options.map(([value, label]) => (

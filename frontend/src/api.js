@@ -101,6 +101,19 @@ export async function cancelRequest(requestId, profileId) {
   return jsonOrThrow(res, "Не удалось отменить заявку");
 }
 
+/**
+ * Сузить или расширить уже созданную комнату.
+ * Меняет любой жилец; меньше числа участников сервер не даст.
+ */
+export async function changeGroupCapacity(groupId, profileId, capacity) {
+  const res = await fetch(`${BASE}/groups/${groupId}/capacity`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ profile_id: profileId, capacity }),
+  });
+  return jsonOrThrow(res, "Не удалось изменить размер комнаты");
+}
+
 export async function leaveGroup(groupId, profileId) {
   const res = await fetch(`${BASE}/groups/${groupId}/leave`, {
     method: "POST",
@@ -164,6 +177,47 @@ export async function respondInvite(inviteId, profileId, accept) {
 export async function fetchProfile(id) {
   const res = await fetch(`${BASE}/profiles/${id}`, { headers: authHeaders() });
   return jsonOrThrow(res, "Анкета не найдена");
+}
+
+/** Сводка для админки: сколько анкет, у скольких есть ник и бот. */
+export async function fetchAdminStats() {
+  const res = await fetch(`${BASE}/admin/stats`, { headers: authHeaders() });
+  return jsonOrThrow(res, "Не удалось загрузить статистику");
+}
+
+/**
+ * Скачивание выгрузки.
+ *
+ * Файл забираем через fetch, а не обычной ссылкой: к запросу нужно приложить
+ * подпись Telegram, а в <a href> заголовки не подставишь.
+ */
+export async function downloadExport({ format, scope, campus }) {
+  const params = new URLSearchParams({ format, scope });
+  if (campus) params.append("campus", campus);
+
+  const res = await fetch(`${BASE}/admin/export?${params}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Не удалось выгрузить данные");
+  }
+
+  // Имя файла сервер присылает в заголовке — он же решает, чем его назвать.
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `export.${format}`;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return filename;
 }
 
 export async function fetchConfig() {

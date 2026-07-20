@@ -10,6 +10,8 @@ export default function RoommateCard({
   myProfile,
   invite,
   onInvite,
+  // Какие комнаты бывают в этом кампус-отеле — в «Облаке» на четверых не селят.
+  capacities = [2, 3, 4],
   busy,
 }) {
   const {
@@ -37,8 +39,9 @@ export default function RoommateCard({
     !profile.group_id &&
     !invite &&
     typeof onInvite === "function";
-  // Человек указал размер комнаты — предлагаем только его; не указал — все.
-  const capacities = room_capacity ? [room_capacity] : [2, 3, 4];
+  // Человек указал размер комнаты — предлагаем только его; не указал — все,
+  // какие бывают в кампус-отеле.
+  const inviteSizes = room_capacity ? [room_capacity] : capacities;
 
   return (
     <article className="card">
@@ -90,7 +93,7 @@ export default function RoommateCard({
         <div className="card__invite">
           <span className="card__invite-label">Позвать жить вместе:</span>
           <div className="card__invite-btns">
-            {capacities.map((n) => (
+            {inviteSizes.map((n) => (
               <button
                 key={n}
                 className="card__invite-btn"

@@ -9,6 +9,7 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Response,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+import admin_export
+import campuses
 import config
 import join_flow
 import models
@@ -25,7 +28,7 @@ import storage
 import telegram_auth
 from database import Base, engine, get_db, wait_for_db
 
-app = FastAPI(title="Кампус-отель Диск — поиск соседей", version="1.0.0")
+app = FastAPI(title="Кампус-отели Диск и Облако — поиск соседей", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -84,6 +87,52 @@ def _assert_is_me(actor: Optional[models.Profile], profile_id: int) -> None:
         )
 
 
+def optional_telegram_user(
+    x_telegram_init_data: Optional[str] = Header(None),
+) -> Optional[dict]:
+    """Как telegram_user, но молча возвращает None вместо 401.
+
+    Нужно там, где вход необязателен: например, чтобы решить, показывать ли
+    кнопку админки, но не закрывать доступ к самой странице.
+    """
+    if not config.TELEGRAM_BOT_TOKEN or not x_telegram_init_data:
+        return None
+    try:
+        return telegram_auth.verify_webapp_init_data(x_telegram_init_data)
+    except telegram_auth.TelegramAuthError:
+        return None
+
+
+def _is_admin(user: Optional[dict]) -> bool:
+    if user is None:
+        # Токена бота нет — подписи не проверяются, это только локальная
+        # разработка. На проде токен есть всегда, иначе не работает вход.
+        return not config.TELEGRAM_BOT_TOKEN
+    return int(user["id"]) in config.ADMIN_TELEGRAM_IDS
+
+
+def require_admin(user: Optional[dict] = Depends(optional_telegram_user)) -> None:
+    """Пускает только владельцев сервиса — выгрузка содержит чужие данные."""
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Раздел только для админов")
+
+
+def _assert_capacity_allowed(campus: str, capacity: int) -> None:
+    """Размер комнаты должен существовать в этом кампус-отеле.
+
+    В «Облаке» комнат на четверых нет, поэтому проверяем и здесь: фронт их
+    не показывает, но запрос можно отправить и мимо него.
+    """
+    if not campuses.allows(campus, capacity):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"В кампус-отеле «{campuses.label(campus)}» комнаты только на "
+                f"{campuses.capacities_text(campus)} человека"
+            ),
+        )
+
+
 def ensure_columns() -> None:
     """Мини-миграция: добавляем новые колонки, не теряя существующие анкеты.
 
@@ -110,6 +159,17 @@ def ensure_columns() -> None:
                 "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT"
             )
         )
+
+        # Кампус-отель. Появился, когда сервис стал обслуживать два отеля.
+        # DEFAULT 'disk' переселяет туда всех, кто зарегистрировался раньше:
+        # тогда существовал только «Диск», в него они и записывались.
+        for table in ("profiles", "groups"):
+            conn.execute(
+                text(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS campus "
+                    f"VARCHAR(20) NOT NULL DEFAULT '{campuses.DISK}'"
+                )
+            )
 
         # Возраст и курс больше не обязательны — их перестали собирать.
         conn.execute(text("ALTER TABLE profiles ALTER COLUMN age DROP NOT NULL"))
@@ -232,6 +292,10 @@ def ensure_columns() -> None:
         conn.execute(text("UPDATE profiles SET course = 1 WHERE course IS NULL"))
         conn.execute(text("ALTER TABLE profiles ALTER COLUMN course SET DEFAULT 1"))
         conn.execute(text("ALTER TABLE profiles ALTER COLUMN course SET NOT NULL"))
+        # Курсов на бакалавриате всего 4, а раньше в анкете предлагались 5 и 6.
+        # Без этого анкеты со старыми значениями перестали бы отдаваться:
+        # схема ответа их больше не пропускает, и лента падала бы с ошибкой.
+        conn.execute(text("UPDATE profiles SET course = 4 WHERE course > 4"))
         for column in (
             "track",
             "sleep_schedule",
@@ -300,12 +364,15 @@ def on_startup():
 
 
 @app.get("/api/config", response_model=schemas.ConfigOut)
-def get_config():
+def get_config(user: Optional[dict] = Depends(optional_telegram_user)):
     """Фронтенд спрашивает, показывать ли кнопку входа через Telegram."""
     return schemas.ConfigOut(
         telegram_enabled=config.telegram_enabled(),
         telegram_bot_username=config.TELEGRAM_BOT_USERNAME or None,
         max_upload_bytes=config.MAX_UPLOAD_BYTES,
+        # Кнопку админки показываем только своим. Это лишь про интерфейс —
+        # сами ручки проверяют подпись отдельно (см. require_admin).
+        is_admin=_is_admin(user),
     )
 
 
@@ -404,11 +471,12 @@ async def telegram_photos(payload: schemas.TelegramPhotosIn):
 def list_profiles(
     db: Session = Depends(get_db),
     gender: Optional[str] = Query(None, pattern="^(male|female|other)$"),
+    campus: Optional[str] = Query(None, pattern=campuses.PATTERN),
     room_capacity: Optional[int] = Query(None, ge=2, le=4),
     smoking: Optional[str] = Query(None, pattern=schemas.SMOKING_PATTERN),
     sleep_schedule: Optional[str] = Query(None, pattern="^(lark|owl|any)$"),
     track: Optional[str] = Query(None, pattern=schemas.TRACK_PATTERN),
-    course: Optional[int] = Query(None, ge=1, le=6),
+    course: Optional[int] = Query(None, ge=1, le=4),
     tidiness: Optional[str] = Query(None, pattern=schemas.TIDINESS_PATTERN),
     wakeup: Optional[str] = Query(None, pattern=schemas.WAKEUP_PATTERN),
     cooking: Optional[str] = Query(None, pattern=schemas.COOKING_ITEM_PATTERN),
@@ -425,6 +493,8 @@ def list_profiles(
     query = db.query(models.Profile)
     if gender:
         query = query.filter(models.Profile.gender == gender)
+    if campus:
+        query = query.filter(models.Profile.campus == campus)
     if without_group is True:
         query = query.filter(models.Profile.group_id.is_(None))
     elif without_group is False:
@@ -540,6 +610,10 @@ def create_profile(payload: schemas.ProfileCreate, db: Session = Depends(get_db)
         if verified_user.get("username"):
             data["telegram"] = str(verified_user["username"]).lstrip("@")
 
+    # Предпочтение по размеру комнаты должно существовать в выбранном кампус-отеле.
+    if data.get("room_capacity"):
+        _assert_capacity_allowed(data["campus"], data["room_capacity"])
+
     # Готовка приходит списком, а в колонке лежит строкой через запятую.
     data["cooking"] = ",".join(data["cooking"])
 
@@ -554,6 +628,7 @@ def create_profile(payload: schemas.ProfileCreate, db: Session = Depends(get_db)
 def update_profile(
     profile_id: int,
     payload: schemas.ProfileUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     actor: Optional[models.Profile] = Depends(current_profile),
 ):
@@ -562,6 +637,9 @@ def update_profile(
     Полноценной авторизации нет: правит тот, у кого в браузере сохранён id.
     Пол не трогаем (он влияет на подбор компании), а подтверждённый через
     Telegram ник менять нельзя — иначе подтверждение потеряет смысл.
+
+    Кампус-отель сменить можно, но это переезд: в чужом отеле и комната, и заявки,
+    и приглашения теряют смысл, поэтому они закрываются.
     """
     _assert_is_me(actor, profile_id)
     profile = _get_profile_or_404(db, profile_id)
@@ -574,6 +652,16 @@ def update_profile(
     else:
         data["telegram"] = payload.telegram.lstrip("@").strip()
 
+    if data.get("room_capacity"):
+        _assert_capacity_allowed(data["campus"], data["room_capacity"])
+
+    msgs: List[dict] = []
+    if data["campus"] != profile.campus:
+        msgs = _remove_from_group(
+            db, profile, note="переехал(а) в другой кампус-отель и вышел(а) из комнаты"
+        )
+        _close_pending(db, profile)
+
     # Готовка — список значений, храним строкой через запятую.
     data["cooking"] = ",".join(data["cooking"])
 
@@ -581,6 +669,8 @@ def update_profile(
         setattr(profile, key, value)
     db.commit()
     db.refresh(profile)
+
+    background_tasks.add_task(notifier.deliver, msgs)
     return profile
 
 
@@ -595,47 +685,13 @@ def delete_profile(
     _assert_is_me(actor, profile_id)
     profile = _get_profile_or_404(db, profile_id)
 
-    group = profile.group if profile.group_id else None
-    leftovers: List[models.Profile] = []
-    left_name = profile.name
-    if group:
-        profile.group_id = None
-        db.flush()
-        db.refresh(group)
-        leftovers = [m for m in group.members]
-
-    # Свои исходящие заявки закрываем как отменённые.
-    db.query(models.JoinRequest).filter(
-        models.JoinRequest.profile_id == profile.id,
-        models.JoinRequest.status == join_flow.PENDING,
-    ).update({"status": join_flow.CANCELLED, "decided_at": datetime.utcnow()})
-
-    decided = []
-    if group:
-        # Состав комнаты изменился — часть заявок могла «дозреть».
-        for req in list(group.requests):
-            if req.status == join_flow.PENDING:
-                new_status = join_flow.evaluate(db, req)
-                if new_status != join_flow.PENDING:
-                    decided.append((req, new_status))
-
     # Сообщения собираем ДО удаления, пока объекты ещё в сессии.
-    msgs: List[dict] = []
-    for member in leftovers:
-        if member.telegram_chat_id:
-            msgs.append(
-                _msg(
-                    member.telegram_chat_id,
-                    f"🚪 <b>{left_name}</b> удалил(а) анкету и вышел(а) из комнаты.\n"
-                    f"Свободных мест стало больше: {config.SITE_URL}",
-                )
-            )
-    for req, status in decided:
-        msgs += _decision_msgs(req, status)
+    msgs = _remove_from_group(
+        db, profile, note="удалил(а) анкету и вышел(а) из комнаты"
+    )
+    _close_pending(db, profile)
 
     db.delete(profile)
-    if group and not group.members:
-        db.delete(group)
     db.commit()
 
     background_tasks.add_task(notifier.deliver, msgs)
@@ -734,6 +790,70 @@ def _decision_msgs(req: models.JoinRequest, status: str) -> List[dict]:
     return []
 
 
+def _remove_from_group(
+    db: Session,
+    profile: models.Profile,
+    note: str = "вышел(а) из вашей комнаты",
+) -> List[dict]:
+    """Выводит человека из комнаты и собирает уведомления оставшимся.
+
+    Сообщения не шлёт, а возвращает: вызывающий отправит их в фоне уже после
+    ответа клиенту. Опустевшую комнату удаляем — она никому не нужна.
+    Одна дорога на все случаи выхода: вышел сам, удалил анкету, переехал.
+    """
+    group = profile.group if profile.group_id else None
+    if group is None:
+        return []
+
+    left_name = profile.name
+    profile.group_id = None
+    db.flush()
+    db.refresh(group)
+
+    # Состав изменился — часть заявок могла «дозреть» без ушедшего.
+    decided = []
+    for req in list(group.requests):
+        if req.status == join_flow.PENDING:
+            new_status = join_flow.evaluate(db, req)
+            if new_status != join_flow.PENDING:
+                decided.append((req, new_status))
+
+    msgs: List[dict] = []
+    for member in group.members:
+        if member.telegram_chat_id:
+            msgs.append(
+                _msg(
+                    member.telegram_chat_id,
+                    f"🚪 <b>{left_name}</b> {note}.\n"
+                    f"Свободных мест стало больше: {config.SITE_URL}",
+                )
+            )
+    for req, status in decided:
+        msgs += _decision_msgs(req, status)
+
+    if not group.members:
+        db.delete(group)
+    return msgs
+
+
+def _close_pending(db: Session, profile: models.Profile) -> None:
+    """Закрывает исходящие заявки и приглашения человека.
+
+    Нужно, когда он выбывает: удалил анкету или переехал в другой кампус-отель —
+    висящие «ждём ответа» после этого только путают остальных.
+    """
+    now = datetime.utcnow()
+    db.query(models.JoinRequest).filter(
+        models.JoinRequest.profile_id == profile.id,
+        models.JoinRequest.status == join_flow.PENDING,
+    ).update({"status": join_flow.CANCELLED, "decided_at": now})
+    db.query(models.GroupInvite).filter(
+        models.GroupInvite.status == "pending",
+        (models.GroupInvite.from_profile_id == profile.id)
+        | (models.GroupInvite.to_profile_id == profile.id),
+    ).update({"status": "cancelled", "decided_at": now})
+
+
 def _apply_vote(
     db: Session, req: models.JoinRequest, voter: models.Profile, approve: bool
 ) -> tuple[str, List[dict]]:
@@ -794,11 +914,14 @@ def _apply_vote(
 def list_groups(
     db: Session = Depends(get_db),
     gender: Optional[str] = Query(None, pattern="^(male|female|other)$"),
+    campus: Optional[str] = Query(None, pattern=campuses.PATTERN),
     only_open: Optional[bool] = Query(None, description="true — только с местами"),
 ):
     query = db.query(models.Group)
     if gender:
         query = query.filter(models.Group.gender == gender)
+    if campus:
+        query = query.filter(models.Group.campus == campus)
     groups = query.order_by(models.Group.created_at.desc()).all()
     if only_open:
         groups = [g for g in groups if g.spots_left > 0]
@@ -825,8 +948,11 @@ def create_group(
     profile = _get_profile_or_404(db, payload.profile_id)
     if profile.group_id:
         raise HTTPException(status_code=409, detail="Ты уже состоишь в компании")
+    _assert_capacity_allowed(profile.campus, payload.capacity)
 
-    group = models.Group(capacity=payload.capacity, gender=profile.gender)
+    group = models.Group(
+        capacity=payload.capacity, gender=profile.gender, campus=profile.campus
+    )
     db.add(group)
     db.flush()  # нужен id до привязки участника
     profile.group_id = group.id
@@ -908,6 +1034,11 @@ def create_join_request(
     if profile.gender != group.gender:
         raise HTTPException(
             status_code=403, detail="Парни живут с парнями, девушки — с девушками"
+        )
+    if profile.campus != group.campus:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Эта комната в кампус-отеле «{campuses.label(group.campus)}»",
         )
     if group.spots_left <= 0:
         raise HTTPException(status_code=409, detail="В компании больше нет мест")
@@ -991,42 +1122,90 @@ def leave_group(
     if profile.group_id != group.id:
         raise HTTPException(status_code=409, detail="Ты не состоишь в этой компании")
 
-    profile.group_id = None
-    db.flush()
-    db.refresh(group)
-
-    leftovers = list(group.members)
-    left_name = profile.name
-
-    # Состав изменился — часть заявок могла «дозреть» без ушедшего.
-    decided = []
-    for req in list(group.requests):
-        if req.status == join_flow.PENDING:
-            new_status = join_flow.evaluate(db, req)
-            if new_status != join_flow.PENDING:
-                decided.append((req, new_status))
-
     # Сообщения собираем до коммита, пока объекты в сессии.
-    msgs: List[dict] = []
-    for member in leftovers:
-        if member.telegram_chat_id:
-            msgs.append(
-                _msg(
-                    member.telegram_chat_id,
-                    f"🚪 <b>{left_name}</b> вышел(а) из вашей комнаты.\n"
-                    f"Свободных мест стало больше: {config.SITE_URL}",
-                )
-            )
-    for req, status in decided:
-        msgs += _decision_msgs(req, status)
-
-    # Пустая компания никому не нужна — удаляем.
-    if not group.members:
-        db.delete(group)
+    msgs = _remove_from_group(db, profile)
     db.commit()
 
     background_tasks.add_task(notifier.deliver, msgs)
     return None
+
+
+@app.post("/api/groups/{group_id}/capacity", response_model=schemas.GroupOut)
+def change_group_capacity(
+    group_id: int,
+    payload: schemas.GroupCapacityIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    """Сузить или расширить уже созданную комнату.
+
+    Собрались вчетвером, а набралось двое — не нужно распускать компанию и
+    собирать заново: комнату на 4 можно сделать комнатой на 2. Меняет любой
+    жилец, остальные узнают об этом из Telegram.
+    """
+    _assert_is_me(actor, payload.profile_id)
+    group = _get_group_or_404(db, group_id)
+    profile = _get_profile_or_404(db, payload.profile_id)
+
+    if profile.group_id != group.id:
+        raise HTTPException(
+            status_code=403, detail="Размер комнаты меняют только те, кто в ней живёт"
+        )
+    _assert_capacity_allowed(group.campus, payload.capacity)
+
+    taken = len(group.members)
+    if payload.capacity < taken:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Вас уже {taken} — комната на {payload.capacity} не вместит. "
+                "Сначала кто-то должен выйти"
+            ),
+        )
+    if payload.capacity == group.capacity:
+        return group
+
+    was = group.capacity
+    group.capacity = payload.capacity
+    db.flush()
+    db.refresh(group)
+
+    # Комнату могли ужать «под ноль» — тогда ждущие заявки теряют смысл.
+    rejected: List[models.JoinRequest] = []
+    if group.spots_left <= 0:
+        for req in list(group.requests):
+            if req.status == join_flow.PENDING:
+                req.status = join_flow.REJECTED
+                req.decided_at = datetime.utcnow()
+                rejected.append(req)
+
+    msgs: List[dict] = []
+    for member in group.members:
+        if member.id != profile.id and member.telegram_chat_id:
+            msgs.append(
+                _msg(
+                    member.telegram_chat_id,
+                    f"🔁 <b>{profile.name}</b> изменил(а) размер вашей комнаты: "
+                    f"была на {was}, стала на {payload.capacity}.\n"
+                    f"{config.SITE_URL}",
+                )
+            )
+    for req in rejected:
+        if req.profile.telegram_chat_id:
+            msgs.append(
+                _msg(
+                    req.profile.telegram_chat_id,
+                    "😔 Комнату сделали меньше, и мест в ней не осталось — "
+                    f"твоя заявка закрыта. Есть другие варианты: {config.SITE_URL}",
+                )
+            )
+
+    db.commit()
+    db.refresh(group)
+
+    background_tasks.add_task(notifier.deliver, msgs)
+    return group
 
 
 # ===== Приглашения «давай жить вместе» =====
@@ -1041,6 +1220,24 @@ def _get_invite_or_404(db: Session, invite_id: int) -> models.GroupInvite:
     if not invite:
         raise HTTPException(status_code=404, detail="Приглашение не найдено")
     return invite
+
+
+def _assert_invite_still_valid(invite: models.GroupInvite) -> None:
+    """Между приглашением и согласием могло многое измениться.
+
+    Пока человек думал, любой из двоих мог вступить в другую компанию или
+    переехать в другой кампус-отель — тогда комнату создавать уже нельзя.
+    """
+    if invite.from_profile.group_id or invite.to_profile.group_id:
+        raise HTTPException(
+            status_code=409, detail="Кто-то из вас уже успел вступить в компанию"
+        )
+    if invite.from_profile.campus != invite.to_profile.campus:
+        raise HTTPException(
+            status_code=409,
+            detail="Кто-то из вас сменил кампус-отель — приглашение больше не действует",
+        )
+    _assert_capacity_allowed(invite.from_profile.campus, invite.capacity)
 
 
 def _invite_msgs(invite: models.GroupInvite) -> List[dict]:
@@ -1066,7 +1263,9 @@ def _accept_invite(
     """Согласие: создаём комнату и заводим туда обоих."""
     author, target = invite.from_profile, invite.to_profile
 
-    group = models.Group(capacity=invite.capacity, gender=author.gender)
+    group = models.Group(
+        capacity=invite.capacity, gender=author.gender, campus=author.campus
+    )
     db.add(group)
     db.flush()  # нужен id до привязки участников
     author.group_id = group.id
@@ -1137,6 +1336,9 @@ def create_invite(
         raise HTTPException(
             status_code=403, detail="Парни живут с парнями, девушки — с девушками"
         )
+    if author.campus != target.campus:
+        raise HTTPException(status_code=403, detail="Вы живёте в разных кампус-отелях")
+    _assert_capacity_allowed(author.campus, payload.capacity)
     if author.group_id:
         raise HTTPException(status_code=409, detail="Ты уже состоишь в компании")
     if target.group_id:
@@ -1202,10 +1404,7 @@ def respond_invite(
         raise HTTPException(status_code=403, detail="Это приглашение не тебе")
 
     if payload.accept:
-        if invite.from_profile.group_id or invite.to_profile.group_id:
-            raise HTTPException(
-                status_code=409, detail="Кто-то из вас уже успел вступить в компанию"
-            )
+        _assert_invite_still_valid(invite)
         _group, msgs = _accept_invite(db, invite)
     else:
         msgs = _decline_invite(db, invite)
@@ -1284,6 +1483,9 @@ def bot_link(payload: schemas.BotLink, db: Session = Depends(get_db)):
             "id": profile.id,
             "name": profile.name,
             "group_id": profile.group_id,
+            # Готовую подпись отдаём с бэкенда: у бота своего справочника
+            # кампус-отелей нет, и заводить второй смысла не имеет.
+            "campus": campuses.label(profile.campus),
         },
     }
 
@@ -1370,10 +1572,7 @@ def bot_invite_respond(
         raise HTTPException(status_code=403, detail="Это приглашение не тебе")
 
     if payload.accept:
-        if invite.from_profile.group_id or invite.to_profile.group_id:
-            raise HTTPException(
-                status_code=409, detail="Кто-то из вас уже успел вступить в компанию"
-            )
+        _assert_invite_still_valid(invite)
         _group, msgs = _accept_invite(db, invite)
         result = "accepted"
     else:
@@ -1386,6 +1585,107 @@ def bot_invite_respond(
         "capacity": invite.capacity,
         "who": invite.from_profile.name,
     }
+
+
+# ===== Админка =====
+# Выгрузка чужих персональных данных, поэтому за require_admin: подпись
+# Telegram должна принадлежать одному из владельцев сервиса.
+
+
+@app.get(
+    "/api/admin/stats",
+    response_model=schemas.AdminStatsOut,
+    dependencies=[Depends(require_admin)],
+)
+def admin_stats(db: Session = Depends(get_db)):
+    """Сводка перед выгрузкой: сколько всего и сколько с кем можно связаться."""
+    profiles = db.query(models.Profile).all()
+    groups = db.query(models.Group).all()
+
+    by_campus: dict = {}
+    for profile in profiles:
+        label = campuses.label(profile.campus)
+        by_campus[label] = by_campus.get(label, 0) + 1
+
+    return schemas.AdminStatsOut(
+        profiles=len(profiles),
+        with_username=len([p for p in profiles if p.telegram]),
+        with_bot=len([p for p in profiles if p.telegram_chat_id]),
+        groups=len(groups),
+        in_groups=len([p for p in profiles if p.group_id]),
+        by_campus=by_campus,
+    )
+
+
+async def _fill_missing_usernames(db: Session, profiles: List[models.Profile]) -> None:
+    """Дотягивает ники у тех, где остался только числовой ID.
+
+    По одному ID человеку не напишешь, а выгрузка нужна как раз для связи.
+    Найденные ники сохраняем — чтобы в следующий раз не ходить в Telegram.
+    """
+    unknown = [
+        p.telegram_id
+        for p in profiles
+        if not p.telegram and (p.telegram_id or p.telegram_chat_id)
+    ]
+    if not unknown:
+        return
+
+    found = await telegram_auth.fetch_usernames([uid for uid in unknown if uid])
+    if not found:
+        return
+    for profile in profiles:
+        username = found.get(profile.telegram_id)
+        if username and not profile.telegram:
+            profile.telegram = username
+    db.commit()
+
+
+@app.get("/api/admin/export", dependencies=[Depends(require_admin)])
+async def download_export(  # имя не admin_export: так звался бы и модуль рядом
+    db: Session = Depends(get_db),
+    fmt: str = Query("xlsx", pattern="^(xlsx|csv|json)$", alias="format"),
+    scope: str = Query("full", pattern="^(full|short)$"),
+    campus: Optional[str] = Query(None, pattern=campuses.PATTERN),
+):
+    """Выгрузка: пользователи и составы комнат.
+
+    format: xlsx (два листа) | csv (архив из двух файлов) | json.
+    scope: full — все параметры анкеты, short — только имена и ники.
+    """
+    query = db.query(models.Profile)
+    groups_query = db.query(models.Group)
+    if campus:
+        query = query.filter(models.Profile.campus == campus)
+        groups_query = groups_query.filter(models.Group.campus == campus)
+
+    profiles = query.order_by(models.Profile.created_at.desc()).all()
+    groups = groups_query.all()
+
+    await _fill_missing_usernames(db, profiles)
+
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    part = "kratko" if scope == admin_export.SHORT else "polno"
+    base = f"kampus-oteli-{part}-{stamp}"
+
+    if fmt == "xlsx":
+        body = admin_export.to_xlsx(profiles, groups, scope)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"{base}.xlsx"
+    elif fmt == "csv":
+        body = admin_export.to_csv_zip(profiles, groups, scope)
+        media = "application/zip"
+        filename = f"{base}-csv.zip"
+    else:
+        body = admin_export.to_json(profiles, groups, scope)
+        media = "application/json; charset=utf-8"
+        filename = f"{base}.json"
+
+    return Response(
+        content=body,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/health")

@@ -160,6 +160,51 @@ async def fetch_profile_photos(
         return [], 0
 
 
+async def fetch_usernames(telegram_ids: list[int]) -> dict[int, str]:
+    """Ники по Telegram ID через getChat.
+
+    Нужно для выгрузки: у части анкет ник пустой или устарел (человек его
+    сменил), а связаться с ним по одному числовому ID нельзя.
+
+    Telegram отдаёт данные только про тех, кого бот «видел» — то есть кто
+    хоть раз ему написал. На остальных просто не будет ответа: это лучше,
+    чем ничего, и ошибкой выгрузку не роняет.
+    """
+    if not TELEGRAM_BOT_TOKEN or not telegram_ids:
+        return {}
+
+    api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+    found: dict[int, str] = {}
+    try:
+        async with httpx.AsyncClient(timeout=15, proxy=TELEGRAM_PROXY_URL) as client:
+
+            async def one(chat_id: int) -> tuple[int, Optional[str]]:
+                try:
+                    resp = await client.get(
+                        f"{api}/getChat", params={"chat_id": chat_id}
+                    )
+                    if resp.status_code != 200:
+                        return chat_id, None
+                    data = resp.json()
+                    if not data.get("ok"):
+                        return chat_id, None
+                    return chat_id, data["result"].get("username")
+                except (httpx.HTTPError, KeyError, ValueError):
+                    return chat_id, None
+
+            # Bot API ограничивает частоту запросов — идём небольшими пачками.
+            for start in range(0, len(telegram_ids), 10):
+                chunk = telegram_ids[start : start + 10]
+                for chat_id, username in await asyncio.gather(
+                    *(one(cid) for cid in chunk)
+                ):
+                    if username:
+                        found[chat_id] = str(username).lstrip("@")
+    except (httpx.HTTPError, httpx.InvalidURL):
+        return found
+    return found
+
+
 async def download_avatar(url: str) -> Optional[bytes]:
     """Скачивает аватар с CDN Telegram.
 
