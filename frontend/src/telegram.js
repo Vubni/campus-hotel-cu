@@ -34,6 +34,22 @@ export function initWebApp() {
   }
 }
 
+/**
+ * Свернуть мини-апп. Нужно после того, как бот прислал файл: человек должен
+ * оказаться в чате и увидеть, что файл пришёл.
+ * Возвращает false, если свернуть нечего (обычный браузер).
+ */
+export function closeWebApp() {
+  const wa = getWebApp();
+  if (!wa?.close) return false;
+  try {
+    wa.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Тема Telegram: подстраиваем приложение под тему клиента. */
 export function getTelegramColorScheme() {
   return getWebApp()?.colorScheme || null;

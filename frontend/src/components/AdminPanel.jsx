@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { downloadExport, fetchAdminStats } from "../api.js";
+import { fetchAdminStats, sendExport } from "../api.js";
 import { CAMPUS } from "../labels.js";
+import { closeWebApp } from "../telegram.js";
 
 // Что кладём в каждый формат — подписи честно объясняют, что человек получит.
 const FORMATS = [
@@ -8,6 +9,10 @@ const FORMATS = [
   ["csv", "CSV (.zip)", "Два файла: users.csv и rooms.csv"],
   ["json", "JSON", "Для обработки программой"],
 ];
+
+// Сколько показывать «отправил», прежде чем свернуть приложение: слишком
+// быстро — человек не поймёт, что произошло, слишком долго — лишнее ожидание.
+const CLOSE_DELAY_MS = 900;
 
 const SCOPES = [
   ["full", "Со всеми параметрами", "Анкеты целиком: быт, курс, направление"],
@@ -28,13 +33,16 @@ export default function AdminPanel({ onClose }) {
       .catch((err) => setError(err.message));
   }, []);
 
-  async function handleDownload(format) {
+  async function handleSend(format) {
     setBusy(format);
     setError("");
     setDone("");
     try {
-      const filename = await downloadExport({ format, scope, campus });
-      setDone(`Готово: ${filename}`);
+      const filename = await sendExport({ format, scope, campus });
+      setDone(`Отправил в чат: ${filename}`);
+      // Сворачиваемся, чтобы человек оказался в чате и увидел файл.
+      // Небольшая пауза — чтобы успел прочитать, что всё получилось.
+      setTimeout(closeWebApp, CLOSE_DELAY_MS);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -117,17 +125,17 @@ export default function AdminPanel({ onClose }) {
           </label>
 
           <div className="field">
-            <span>Формат</span>
+            <span>Прислать файлом в чат</span>
             <div className="admin__choices">
               {FORMATS.map(([value, label, hint]) => (
                 <button
                   key={value}
                   type="button"
                   className="admin__choice admin__choice--action"
-                  onClick={() => handleDownload(value)}
+                  onClick={() => handleSend(value)}
                   disabled={Boolean(busy)}
                 >
-                  <b>{busy === value ? "Готовим…" : label}</b>
+                  <b>{busy === value ? "Отправляем…" : label}</b>
                   <span>{hint}</span>
                 </button>
               ))}

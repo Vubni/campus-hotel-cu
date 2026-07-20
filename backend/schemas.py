@@ -300,6 +300,14 @@ class ConfigOut(BaseModel):
     is_admin: bool = False
 
 
+class AdminExportIn(BaseModel):
+    """Какую выгрузку прислать файлом в Telegram."""
+
+    format: str = Field("xlsx", pattern="^(xlsx|csv|json)$")
+    scope: str = Field("full", pattern="^(full|short)$")
+    campus: Optional[str] = Field(None, pattern=campuses.PATTERN)
+
+
 class AdminStatsOut(BaseModel):
     """Что показать в админке до выгрузки — чтобы понимать объём."""
 

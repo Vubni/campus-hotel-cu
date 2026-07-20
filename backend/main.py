@@ -1651,17 +1651,13 @@ async def _fill_missing_usernames(db: Session, profiles: List[models.Profile]) -
     db.commit()
 
 
-@app.get("/api/admin/export", dependencies=[Depends(require_admin)])
-async def download_export(  # имя не admin_export: так звался бы и модуль рядом
-    db: Session = Depends(get_db),
-    fmt: str = Query("xlsx", pattern="^(xlsx|csv|json)$", alias="format"),
-    scope: str = Query("full", pattern="^(full|short)$"),
-    campus: Optional[str] = Query(None, pattern=campuses.PATTERN),
-):
-    """Выгрузка: пользователи и составы комнат.
+async def _build_export(
+    db: Session, fmt: str, scope: str, campus: Optional[str]
+) -> tuple[bytes, str, str]:
+    """Собирает файл выгрузки: (содержимое, имя файла, MIME-тип).
 
-    format: xlsx (два листа) | csv (архив из двух файлов) | json.
-    scope: full — все параметры анкеты, short — только имена и ники.
+    Общая дорога для обоих способов получить данные — скачиванием и файлом
+    в Telegram: иначе они со временем разъедутся.
     """
     query = db.query(models.Profile)
     groups_query = db.query(models.Group)
@@ -1679,18 +1675,75 @@ async def download_export(  # имя не admin_export: так звался бы
     base = f"kampus-oteli-{part}-{stamp}"
 
     if fmt == "xlsx":
-        body = admin_export.to_xlsx(profiles, groups, scope)
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        filename = f"{base}.xlsx"
-    elif fmt == "csv":
-        body = admin_export.to_csv_zip(profiles, groups, scope)
-        media = "application/zip"
-        filename = f"{base}-csv.zip"
-    else:
-        body = admin_export.to_json(profiles, groups, scope)
-        media = "application/json; charset=utf-8"
-        filename = f"{base}.json"
+        return (
+            admin_export.to_xlsx(profiles, groups, scope),
+            f"{base}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    if fmt == "csv":
+        return (
+            admin_export.to_csv_zip(profiles, groups, scope),
+            f"{base}-csv.zip",
+            "application/zip",
+        )
+    return (
+        admin_export.to_json(profiles, groups, scope),
+        f"{base}.json",
+        "application/json; charset=utf-8",
+    )
 
+
+@app.post("/api/admin/export/send", dependencies=[Depends(require_admin)])
+async def send_export_to_telegram(
+    payload: schemas.AdminExportIn,
+    user: Optional[dict] = Depends(optional_telegram_user),
+    db: Session = Depends(get_db),
+):
+    """Присылает выгрузку файлом в личку боту.
+
+    Так надёжнее, чем скачивание: внутри Telegram на macOS и iOS скачанный
+    файл открыть нечем, а присланный ботом документ система показывает сама.
+    """
+    body, filename, _media = await _build_export(
+        db, payload.format, payload.scope, payload.campus
+    )
+
+    # В личной переписке chat_id совпадает с id пользователя, а он у нас из
+    # проверенной подписи — то есть файл уходит ровно тому, кто его запросил.
+    # Своей анкеты у админа может и не быть, поэтому её мы не спрашиваем.
+    if user is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Не могу определить, кому отправлять: открой приложение из Telegram",
+        )
+
+    where = campuses.label(payload.campus) if payload.campus else "оба отеля"
+    what = "имена и ники" if payload.scope == admin_export.SHORT else "все параметры"
+    try:
+        await notifier.send_document(
+            int(user["id"]),
+            filename,
+            body,
+            caption=f"📊 Выгрузка · {what} · {where}",
+        )
+    except notifier.DocumentError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sent": True, "filename": filename}
+
+
+@app.get("/api/admin/export", dependencies=[Depends(require_admin)])
+async def download_export(  # имя не admin_export: так звался бы и модуль рядом
+    db: Session = Depends(get_db),
+    fmt: str = Query("xlsx", pattern="^(xlsx|csv|json)$", alias="format"),
+    scope: str = Query("full", pattern="^(full|short)$"),
+    campus: Optional[str] = Query(None, pattern=campuses.PATTERN),
+):
+    """Та же выгрузка, но скачиванием — удобно дёрнуть curl'ом с компьютера.
+
+    В интерфейсе не используется: см. /api/admin/export/send.
+    """
+    body, filename, media = await _build_export(db, fmt, scope, campus)
     return Response(
         content=body,
         media_type=media,

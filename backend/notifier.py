@@ -63,6 +63,41 @@ async def send_message(
         return False
 
 
+class DocumentError(Exception):
+    """Файл не ушёл в Telegram — в отличие от уведомлений, об этом надо сказать.
+
+    Человек нажал «выгрузить» и ждёт файл: молча проглотить ошибку нельзя,
+    иначе он будет искать в чате то, чего там нет.
+    """
+
+
+async def send_document(
+    chat_id: int, filename: str, content: bytes, caption: str = ""
+) -> None:
+    """Отправляет файл в личку. Бросает DocumentError, если не получилось."""
+    if not TELEGRAM_BOT_TOKEN:
+        raise DocumentError("Бот не настроен на сервере")
+    if not chat_id:
+        raise DocumentError("Неизвестно, в какой чат отправлять")
+
+    try:
+        async with httpx.AsyncClient(timeout=60, proxy=TELEGRAM_PROXY_URL) as client:
+            resp = await client.post(
+                API.format(token=TELEGRAM_BOT_TOKEN, method="sendDocument"),
+                data={"chat_id": str(chat_id), "caption": caption[:1024]},
+                files={"document": (filename, content)},
+            )
+    except httpx.HTTPError as exc:
+        log.warning("Не смог отправить файл в Telegram: %s", exc)
+        raise DocumentError("Telegram не отвечает, попробуй ещё раз")
+
+    if resp.status_code != 200:
+        # Причину не угадываем — в мини-апп заходят из чата с ботом, так что
+        # обычное «нажми /start» тут ни при чём. Подробности пишем в лог.
+        log.warning("Telegram не принял файл: %s", resp.text[:200])
+        raise DocumentError("Telegram не принял файл, попробуй ещё раз")
+
+
 def invite_keyboard(invite_id: int) -> dict:
     """Кнопки под приглашением «давай жить вместе»."""
     return {

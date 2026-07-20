@@ -186,38 +186,20 @@ export async function fetchAdminStats() {
 }
 
 /**
- * Скачивание выгрузки.
+ * Просим бота прислать выгрузку файлом в чат.
  *
- * Файл забираем через fetch, а не обычной ссылкой: к запросу нужно приложить
- * подпись Telegram, а в <a href> заголовки не подставишь.
+ * Не скачиваем в браузере: внутри Telegram на macOS и iOS скачанный файл
+ * открыть нечем — таблица показывается пустой или не открывается вовсе.
+ * Присланный ботом документ система открывает сама.
  */
-export async function downloadExport({ format, scope, campus }) {
-  const params = new URLSearchParams({ format, scope });
-  if (campus) params.append("campus", campus);
-
-  const res = await fetch(`${BASE}/admin/export?${params}`, {
-    headers: authHeaders(),
+export async function sendExport({ format, scope, campus }) {
+  const res = await fetch(`${BASE}/admin/export/send`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ format, scope, campus: campus || null }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Не удалось выгрузить данные");
-  }
-
-  // Имя файла сервер присылает в заголовке — он же решает, чем его назвать.
-  const disposition = res.headers.get("Content-Disposition") || "";
-  const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : `export.${format}`;
-
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-  return filename;
+  const data = await jsonOrThrow(res, "Не удалось отправить выгрузку");
+  return data.filename;
 }
 
 export async function fetchConfig() {
