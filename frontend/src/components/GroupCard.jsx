@@ -18,7 +18,7 @@ function Avatar({ person, className = "" }) {
 }
 
 function Member({ member }) {
-  // Раскрытие: даже если человек уже в компании, можно посмотреть его анкету
+  // Раскрытие: даже если человек уже в комнате, можно посмотреть его анкету
   // и решить, стоит ли к нему проситься.
   const [open, setOpen] = useState(false);
   const meta = [TRACK[member.track], member.course ? `${member.course} курс` : null]
@@ -49,7 +49,7 @@ function Member({ member }) {
       {open && (
         <div className="gmember__details">
           {member.bio && <p className="gmember__bio">{member.bio}</p>}
-          <span className="card__room">{roomLabel(member.room_capacity)}</span>
+          <span className="card__room">{roomLabel(member.room_capacities)}</span>
           <ProfileSpecs profile={member} />
           <a
             className="gmember__tg"
@@ -130,14 +130,23 @@ export default function GroupCard({
 
   let hint = null;
   if (!myProfile) hint = "Размести анкету, чтобы подать заявку";
-  else if (!iAmMember && myProfile.group_id) hint = "Ты уже в другой компании";
+  else if (!iAmMember && myProfile.group_id) hint = "Ты уже в другой комнате";
   else if (!iAmMember && full) hint = "Мест нет";
 
   return (
     <article className={`gcard${full ? " gcard--full" : ""}`}>
       <div className="gcard__head">
         <div>
-          <h3 className="gcard__title">Комната на {capacity}</h3>
+          <h3 className="gcard__title">
+            Комната на {capacity}
+            {/* Комната в блоке — размер у неё уже не поменять, и это видно
+                сразу, а не только когда кнопка окажется недоступной. */}
+            {group.block_id && (
+              <span className="gcard__block" title="Комната объединена в блок">
+                🧩 в блоке
+              </span>
+            )}
+          </h3>
           <p className="gcard__status">
             {full ? (
               "Состав собран"
@@ -188,11 +197,14 @@ export default function GroupCard({
       )}
 
       {/* Планы меняются: собирались вчетвером, а набралось двое — комнату
-          можно ужать, не распуская компанию. Меньше, чем вас уже есть, —
-          нельзя, поэтому такие размеры недоступны. */}
+          можно ужать, не распуская её. Меньше, чем вас уже есть, — нельзя,
+          поэтому такие размеры недоступны. В блоке размер зафиксирован:
+          в блоке ровно 6 человек, и другой размер его сломает. */}
       {iAmMember && typeof onChangeCapacity === "function" && (
         <div className="gcard__resize">
-          <span className="gcard__resize-label">Размер комнаты:</span>
+          <span className="gcard__resize-label">
+            {group.block_id ? "Размер зафиксирован блоком:" : "Размер комнаты:"}
+          </span>
           <div className="gcard__resize-btns">
             {capacities.map((n) => (
               <button
@@ -201,11 +213,18 @@ export default function GroupCard({
                   n === capacity ? " gcard__resize-btn--on" : ""
                 }`}
                 onClick={() => onChangeCapacity(id, n)}
-                disabled={busy || n === capacity || n < members.length}
+                disabled={
+                  busy ||
+                  n === capacity ||
+                  n < members.length ||
+                  Boolean(group.block_id)
+                }
                 title={
-                  n < members.length
-                    ? `Вас уже ${members.length} — не поместитесь`
-                    : `Сделать комнатой на ${n}`
+                  group.block_id
+                    ? "Комната в блоке — сначала выйдите из блока"
+                    : n < members.length
+                      ? `Вас уже ${members.length} — не поместитесь`
+                      : `Сделать комнатой на ${n}`
                 }
                 aria-pressed={n === capacity}
               >
@@ -218,7 +237,7 @@ export default function GroupCard({
 
       {iAmMember ? (
         <button className="gcard__leave" onClick={() => onLeave(id)} disabled={busy}>
-          Выйти из компании
+          Выйти из комнаты
         </button>
       ) : myRequestHere ? (
         <div className="gcard__pending">

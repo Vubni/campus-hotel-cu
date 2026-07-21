@@ -938,7 +938,7 @@ body {
   color: var(--solid-text);
 }
 
-/* ===== Раздел компаний ===== */
+/* ===== Раздел комнат ===== */
 .groups__top {
   display: flex;
   flex-wrap: wrap;
@@ -1180,7 +1180,7 @@ a.gmember:hover {
   padding: 6px 0;
 }
 
-/* ===== Размер комнаты: сузить или расширить уже собранную компанию ===== */
+/* ===== Размер комнаты: сузить или расширить уже собранную комнату ===== */
 .gcard__resize {
   display: flex;
   flex-wrap: wrap;
@@ -1721,6 +1721,202 @@ a.gmember:hover {
 .modal__danger-confirm:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* ===== Раздел «Блок» =====
+   Блок — две комнаты с общим входом, вместе на 6 человек: 2+4 или 3+3.
+   Бывает только в «Диске». */
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.block__head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 14px;
+}
+.block__title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.block__sub {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+}
+.block__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.block__section-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+.block__rooms,
+.block__candidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.block__leave {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 11px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.block__leave:hover:not(:disabled) {
+  border-color: #e5484d;
+  color: #e5484d;
+}
+.block__leave:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.block__hint {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+/* Комната внутри блока — состав одной строкой, без раскрытия. */
+.broom {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.broom--mine {
+  border-color: var(--accent);
+}
+.broom__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.broom__size {
+  font-size: 15px;
+  font-weight: 800;
+}
+.broom__title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+.broom__count {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.broom__who {
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 6px;
+}
+.broom__free {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+}
+
+/* Предложение объединиться: входящее (голосуем) или исходящее (ждём). */
+.breq,
+.bcand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.breq__votes {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.breq__actions {
+  display: flex;
+  gap: 8px;
+}
+.breq__yes,
+.breq__no,
+.breq__cancel,
+.bcand__btn {
+  border: none;
+  border-radius: var(--pill);
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.breq__yes,
+.bcand__btn {
+  background: var(--solid-bg);
+  color: var(--solid-text);
+}
+.breq__yes:hover:not(:disabled),
+.bcand__btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+.breq__no,
+.breq__cancel {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+}
+.breq__no:hover:not(:disabled),
+.breq__cancel:hover:not(:disabled) {
+  border-color: #e5484d;
+  color: #e5484d;
+}
+.breq__cancel,
+.bcand__btn {
+  align-self: flex-start;
+}
+.breq__yes:disabled,
+.breq__no:disabled,
+.breq__cancel:disabled,
+.bcand__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.breq__waiting,
+.bcand__sent {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+/* Метка «в блоке» в карточке комнаты — размер там уже не поменять. */
+.gcard__block {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* Счётчик входящих предложений на вкладке — зовёт заметнее обычного. */
+.tabs__badge--alert {
+  background: #e5484d;
+  color: #fff;
+}
+.tabs__btn--on .tabs__badge--alert {
+  background: #e5484d;
+  color: #fff;
 }
 
 /* На тач-экранах hover-эффекты «залипают» после нажатия — отключаем подъём

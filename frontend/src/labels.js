@@ -6,9 +6,29 @@ export const DEFAULT_CAMPUS = "disk";
 export const CAMPUS = { disk: "Диск", cloud: "Облако" };
 const CAMPUS_CAPACITIES = { disk: [2, 3, 4], cloud: [2, 3] };
 
+// Блок — две комнаты с общим входом, вместе на 6 человек: 2+4 или 3+3.
+// Бывает только в «Диске».
+export const BLOCK_SIZE = 6;
+const CAMPUS_WITH_BLOCKS = ["disk"];
+
 /** Какие комнаты бывают в этом кампус-отеле: [2, 3, 4] или [2, 3]. */
 export function campusCapacities(campus) {
   return CAMPUS_CAPACITIES[campus] || CAMPUS_CAPACITIES[DEFAULT_CAMPUS];
+}
+
+/** Есть ли в этом кампус-отеле блоки. */
+export function campusHasBlocks(campus) {
+  return CAMPUS_WITH_BLOCKS.includes(campus);
+}
+
+/**
+ * Комната какого размера соберёт с этой полный блок.
+ * null — пары не существует (в отеле нет блоков или такой комнаты там не бывает).
+ */
+export function blockPartner(campus, capacity) {
+  if (!campusHasBlocks(campus)) return null;
+  const partner = BLOCK_SIZE - capacity;
+  return campusCapacities(campus).includes(partner) ? partner : null;
 }
 
 /** «2–4» / «2–3» — для подписей вроде «Комнаты на 2–3 человека». */
@@ -71,9 +91,16 @@ export function cookingLabel(value) {
     .join(", ");
 }
 
-// capacity === null — «не предпочтительно»: подойдёт комната любого размера.
-export function roomLabel(capacity) {
-  return capacity ? `Комната на ${capacity} чел.` : "Комната: не важно";
+/**
+ * Желаемые размеры комнаты: их может быть несколько («3 или 4»).
+ * Пустой список — «не важно», подойдёт комната любого размера.
+ */
+export function roomLabel(capacities) {
+  const sizes = Array.isArray(capacities)
+    ? capacities
+    : [capacities].filter(Boolean);
+  if (sizes.length === 0) return "Комната: не важно";
+  return `Комната на ${sizes.join(" или ")} чел.`;
 }
 
 /**

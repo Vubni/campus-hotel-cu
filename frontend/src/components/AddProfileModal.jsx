@@ -31,7 +31,7 @@ const EMPTY_FORM = {
   track: "",
   course: 1, // варианта «не выбрано» нет — по умолчанию 1 курс
   bio: "",
-  room_capacity: "",
+  room_capacities: [], // можно выбрать несколько; пустой список — «не важно»
   sleep_schedule: "",
   smoking: "",
   tidiness: "",
@@ -64,9 +64,11 @@ function formFromProfile(profile) {
       form[key] = profile[key];
     }
   }
-  // NULL на сервере = «не выбрано» — в селекте это пустая строка.
-  form.room_capacity = profile.room_capacity ?? "";
   form.course = profile.course ?? 1;
+  // Размеры комнаты — всегда массив (на случай старых одиночных значений).
+  form.room_capacities = Array.isArray(profile.room_capacities)
+    ? profile.room_capacities
+    : [profile.room_capacities].filter(Boolean);
   // Готовка — всегда массив (на случай старых строковых данных).
   form.cooking = Array.isArray(profile.cooking)
     ? profile.cooking
@@ -109,19 +111,31 @@ export default function AddProfileModal({
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
   /**
-   * Смена кампус-отеля. В «Облаке» комнат на четверых нет, поэтому предпочтение,
-   * которого там не бывает, сбрасываем — иначе сервер отказал бы при сохранении.
+   * Смена кампус-отеля. В «Облаке» комнат на четверых нет, поэтому размеры,
+   * которых там не бывает, убираем — иначе сервер отказал бы при сохранении.
    */
   function changeCampus(e) {
     const next = e.target.value;
     setForm((prev) => {
-      const allowed = campusCapacities(next).map(String);
+      const allowed = campusCapacities(next);
       return {
         ...prev,
         campus: next,
-        room_capacity: allowed.includes(String(prev.room_capacity))
-          ? prev.room_capacity
-          : "",
+        room_capacities: prev.room_capacities.filter((n) => allowed.includes(n)),
+      };
+    });
+  }
+
+  // Размеров комнаты можно выбрать несколько: «хочу 3 или 4, но не двухместную».
+  // Снять можно всё — пустой список означает «подойдёт любая».
+  function toggleRoomCapacity(value) {
+    setForm((prev) => {
+      const has = prev.room_capacities.includes(value);
+      return {
+        ...prev,
+        room_capacities: has
+          ? prev.room_capacities.filter((n) => n !== value)
+          : [...prev.room_capacities, value].sort((a, b) => a - b),
       };
     });
   }
@@ -223,9 +237,6 @@ export default function AddProfileModal({
       const payload = {
         ...form,
         gender,
-        // "" — «не выбрано»: шлём null, иначе Number("") дал бы 0.
-        room_capacity:
-          form.room_capacity === "" ? null : Number(form.room_capacity),
         course: Number(form.course),
         // Сервер перепроверит подпись и сам решит, ставить ли галочку.
         ...(tgAuth || {}),
@@ -307,7 +318,7 @@ export default function AddProfileModal({
             <p className="modal__warn">
               Смена кампус-отеля — это переезд:{" "}
               {profile.group_id
-                ? "ты выйдешь из своей компании, а заявки и приглашения закроются."
+                ? "ты выйдешь из своей комнаты, а заявки и приглашения закроются."
                 : "твои заявки и приглашения закроются."}
             </p>
           )}
@@ -431,28 +442,41 @@ export default function AddProfileModal({
             />
           </label>
 
-          <div className="field-row">
-            <label className="field">
-              <span>Комната на</span>
-              <select value={form.room_capacity} onChange={set("room_capacity")}>
-                <option value="">Не предпочтительно</option>
-                {campusCapacities(form.campus).map((n) => (
-                  <option key={n} value={n}>
-                    {n} человека
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Режим сна</span>
-              <select value={form.sleep_schedule} onChange={set("sleep_schedule")}>
-                <option value="">Не выбрано</option>
-                <option value="any">Без разницы</option>
-                <option value="lark">Жаворонок</option>
-                <option value="owl">Сова</option>
-              </select>
-            </label>
+          {/* Размеров можно выбрать несколько: «трёх- или четырёхместную, но
+              не двухместную». Ничего не выбрано — подойдёт любая. */}
+          <div className="field">
+            <span>
+              Комната на (можно выбрать несколько){" "}
+              {form.room_capacities.length === 0 && (
+                <span className="field__count">подойдёт любая</span>
+              )}
+            </span>
+            <div className="multi">
+              {campusCapacities(form.campus).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={`multi__btn${
+                    form.room_capacities.includes(n) ? " multi__btn--on" : ""
+                  }`}
+                  onClick={() => toggleRoomCapacity(n)}
+                  aria-pressed={form.room_capacities.includes(n)}
+                >
+                  на {n}
+                </button>
+              ))}
+            </div>
           </div>
+
+          <label className="field">
+            <span>Режим сна</span>
+            <select value={form.sleep_schedule} onChange={set("sleep_schedule")}>
+              <option value="">Не выбрано</option>
+              <option value="any">Без разницы</option>
+              <option value="lark">Жаворонок</option>
+              <option value="owl">Сова</option>
+            </select>
+          </label>
 
           <div className="field-row">
             <label className="field">

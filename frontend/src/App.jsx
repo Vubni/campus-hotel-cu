@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import {
+  cancelBlockRequest,
   cancelRequest,
   changeGroupCapacity,
   createGroup,
   createInvite,
+  fetchBlockCandidates,
+  fetchBlockRequests,
+  fetchBlocks,
   fetchConfig,
   fetchGroupRequests,
   fetchGroups,
@@ -11,19 +15,28 @@ import {
   fetchMyRequests,
   respondInvite,
   fetchProfiles,
+  leaveBlock,
   leaveGroup,
+  requestBlock,
   requestJoin,
+  voteBlockRequest,
   voteRequest,
 } from "./api.js";
 import RoommateCard from "./components/RoommateCard.jsx";
 import GroupCard from "./components/GroupCard.jsx";
+import BlockPanel from "./components/BlockPanel.jsx";
 import Filters from "./components/Filters.jsx";
 import AddProfileModal from "./components/AddProfileModal.jsx";
 import AdminPanel from "./components/AdminPanel.jsx";
 import GenderGate from "./components/GenderGate.jsx";
 import CampusGate from "./components/CampusGate.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
-import { CAMPUS, campusCapacities, campusRoomsText } from "./labels.js";
+import {
+  CAMPUS,
+  campusCapacities,
+  campusHasBlocks,
+  campusRoomsText,
+} from "./labels.js";
 import { initWebApp } from "./telegram.js";
 import { useMyProfile } from "./useMyProfile.js";
 
@@ -58,10 +71,16 @@ export default function App() {
   const [campus, setCampus] = useState(
     () => localStorage.getItem(CAMPUS_KEY) || ""
   );
-  const [tab, setTab] = useState("singles"); // "singles" | "groups"
+  const [tab, setTab] = useState("singles"); // "singles" | "groups" | "blocks"
 
   const [profiles, setProfiles] = useState([]);
   const [groups, setGroups] = useState([]);
+  // Собранные блоки: две комнаты по 6 человек вместе. Только в «Диске».
+  const [blocks, setBlocks] = useState([]);
+  // Что доступно моей комнате по блокам: с кем можно объединиться и кто уже
+  // позвал. Грузим отдельно — это внутреннее дело комнаты, а не общая лента.
+  const [blockCandidates, setBlockCandidates] = useState([]);
+  const [blockRequests, setBlockRequests] = useState([]);
   // Заявки в мою комнату (id заявки → голосуем) и мои исходящие заявки.
   const [incoming, setIncoming] = useState([]);
   const [myRequests, setMyRequests] = useState([]);
@@ -97,8 +116,8 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
-      // Одиночки — те, кто ещё не в компании; компании грузим отдельно.
-      const [people, companies] = await Promise.all([
+      // Одиночки — те, кто ещё не в комнате; комнаты и блоки грузим отдельно.
+      const [people, rooms, allBlocks] = await Promise.all([
         fetchProfiles({
           ...currentFilters,
           gender: currentGender,
@@ -106,9 +125,13 @@ export default function App() {
           without_group: true,
         }),
         fetchGroups({ gender: currentGender, campus: currentCampus }),
+        campusHasBlocks(currentCampus)
+          ? fetchBlocks({ gender: currentGender, campus: currentCampus })
+          : Promise.resolve([]),
       ]);
       setProfiles(people);
-      setGroups(companies);
+      setGroups(rooms);
+      setBlocks(allBlocks);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -122,17 +145,25 @@ export default function App() {
       setIncoming([]);
       setMyRequests([]);
       setMyInvites([]);
+      setBlockRequests([]);
+      setBlockCandidates([]);
       return;
     }
+    // Блоки касаются только тех, кто уже собрал комнату в отеле с блоками.
+    const withBlocks = Boolean(me.group_id) && campusHasBlocks(me.campus);
     try {
-      const [mine, inbox, invites] = await Promise.all([
+      const [mine, inbox, invites, blockReqs, cands] = await Promise.all([
         fetchMyRequests(me.id),
         me.group_id ? fetchGroupRequests(me.group_id) : Promise.resolve([]),
         fetchMyInvites(me.id),
+        withBlocks ? fetchBlockRequests(me.group_id) : Promise.resolve([]),
+        withBlocks ? fetchBlockCandidates(me.group_id) : Promise.resolve([]),
       ]);
       setMyRequests(mine);
       setIncoming(inbox);
       setMyInvites(invites);
+      setBlockRequests(blockReqs);
+      setBlockCandidates(cands);
     } catch {
       // Заявки — не критично: лента должна работать и без них.
       setIncoming([]);
@@ -181,7 +212,7 @@ export default function App() {
   function handleUpdated(profile) {
     setModal(null);
     remember(profile); // обновляем «мою анкету»
-    // Если анкета в ленте (без компании) — освежаем её на месте.
+    // Если анкета в ленте (без комнаты) — освежаем её на месте.
     setProfiles((prev) => prev.map((p) => (p.id === profile.id ? profile : p)));
   }
 
@@ -242,6 +273,20 @@ export default function App() {
   const handleRespondInvite = (inviteId, accept) =>
     withBusy(() => respondInvite(inviteId, myProfile.id, accept));
 
+  // Блоки: объединяются комнатами, поэтому решает не один человек — согласие
+  // должны дать все жильцы позванной комнаты.
+  const handleRequestBlock = (toGroupId) =>
+    withBusy(() => requestBlock(myProfile.id, toGroupId));
+
+  const handleVoteBlock = (requestId, approve) =>
+    withBusy(() => voteBlockRequest(requestId, myProfile.id, approve));
+
+  const handleCancelBlock = (requestId) =>
+    withBusy(() => cancelBlockRequest(requestId, myProfile.id));
+
+  const handleLeaveBlock = (blockId) =>
+    withBusy(() => leaveBlock(blockId, myProfile.id));
+
   // Кампус-отель определяет и ленту, и размеры комнат — спрашиваем его первым.
   if (!campus) {
     return <CampusGate onSelect={chooseCampus} />;
@@ -259,6 +304,18 @@ export default function App() {
   const openGroups = groups.filter((g) => g.spots_left > 0);
   const canStartGroup = myProfile && !myProfile.group_id;
   const capacities = campusCapacities(campus);
+  const hasBlocks = campusHasBlocks(campus);
+  // Моя комната и мой блок — из уже загруженных лент, отдельный запрос не нужен.
+  const myGroup = myProfile?.group_id
+    ? groups.find((g) => g.id === myProfile.group_id)
+    : null;
+  const myBlock = myGroup?.block_id
+    ? blocks.find((b) => b.id === myGroup.block_id)
+    : null;
+  // Входящие предложения о блоке зовут не хуже приглашений — показываем счётчик.
+  const blockInbox = myGroup
+    ? blockRequests.filter((r) => r.to_group_id === myGroup.id).length
+    : 0;
   // Пусто из-за фильтров или тут вообще никого нет — это разные сообщения.
   const filtersActive = Object.values(filters).some((v) => v !== "");
 
@@ -290,7 +347,7 @@ export default function App() {
             )}
             {/* Пока анкеты нет, отель можно перевыбрать здесь. С анкетой
                 она хранится в ней — и меняется только там, чтобы случайное
-                нажатие не выкинуло человека из компании. */}
+                нажатие не выкинуло человека из комнаты. */}
             {myProfile ? (
               <span
                 className="header__campus"
@@ -359,7 +416,7 @@ export default function App() {
               <strong className="promo__title">Тебя ещё никто не видит</strong>
               <span className="promo__sub">
                 Размести анкету — иначе не получится ни написать, ни собрать
-                компанию. Это минута.
+                комнату. Это минута.
               </span>
             </div>
             <button className="promo__btn" onClick={() => setModal("create")}>
@@ -380,9 +437,23 @@ export default function App() {
             className={`tabs__btn${tab === "groups" ? " tabs__btn--on" : ""}`}
             onClick={() => setTab("groups")}
           >
-            Компании
+            Комнаты
             <span className="tabs__badge">{groups.length}</span>
           </button>
+          {/* Блоки бывают только в «Диске» — в «Облаке» вкладку не показываем. */}
+          {hasBlocks && (
+            <button
+              className={`tabs__btn${tab === "blocks" ? " tabs__btn--on" : ""}`}
+              onClick={() => setTab("blocks")}
+            >
+              Блок
+              {blockInbox > 0 && (
+                <span className="tabs__badge tabs__badge--alert">
+                  {blockInbox}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         {incomingInvites.length > 0 && (
@@ -432,7 +503,7 @@ export default function App() {
               Ищут соседей: <strong>{profiles.length}</strong>
               {openGroups.length > 0 && (
                 <>
-                  {" "}· компаний с местами: <strong>{openGroups.length}</strong>
+                  {" "}· комнат с местами: <strong>{openGroups.length}</strong>
                 </>
               )}
             </p>
@@ -464,16 +535,32 @@ export default function App() {
           </>
         )}
 
+        {!loading && !error && tab === "blocks" && (
+          <BlockPanel
+            campus={campus}
+            myProfile={myProfile}
+            myGroup={myGroup}
+            myBlock={myBlock}
+            candidates={blockCandidates}
+            requests={blockRequests}
+            onRequestBlock={handleRequestBlock}
+            onVoteBlock={handleVoteBlock}
+            onCancelBlock={handleCancelBlock}
+            onLeaveBlock={handleLeaveBlock}
+            busy={busy}
+          />
+        )}
+
         {!loading && !error && tab === "groups" && (
           <>
             <div className="groups__top">
               <p className="count">
-                Компаний: <strong>{groups.length}</strong> · с местами:{" "}
+                Комнат: <strong>{groups.length}</strong> · с местами:{" "}
                 <strong>{openGroups.length}</strong>
               </p>
               {canStartGroup && (
                 <div className="groups__new">
-                  <span>Договорились с кем-то? Создай компанию:</span>
+                  <span>Договорились с кем-то? Создай комнату:</span>
                   {capacities.map((capacity) => (
                     <button
                       key={capacity}
@@ -488,7 +575,7 @@ export default function App() {
               )}
               {!myProfile && (
                 <p className="groups__hint">
-                  Размести анкету — и сможешь создать свою компанию или вступить
+                  Размести анкету — и сможешь собрать свою комнату или вступить
                   в чужую.
                 </p>
               )}
@@ -496,7 +583,7 @@ export default function App() {
 
             {groups.length === 0 ? (
               <p className="state">
-                Пока никто не собрался. Создай первую компанию — остальные
+                Пока никто не собрался. Собери первую комнату — остальные
                 присоединятся.
               </p>
             ) : (

@@ -22,7 +22,7 @@ export default function RoommateCard({
     track,
     course,
     bio,
-    room_capacity,
+    room_capacities = [],
     telegram_verified,
   } = profile;
 
@@ -39,9 +39,10 @@ export default function RoommateCard({
     !profile.group_id &&
     !invite &&
     typeof onInvite === "function";
-  // Человек указал размер комнаты — предлагаем только его; не указал — все,
-  // какие бывают в кампус-отеле.
-  const inviteSizes = room_capacity ? [room_capacity] : capacities;
+  // Человек назвал желаемые размеры — предлагаем только их (и только те, что
+  // бывают в этом кампус-отеле); не назвал — все возможные.
+  const wanted = room_capacities.filter((n) => capacities.includes(n));
+  const inviteSizes = wanted.length > 0 ? wanted : capacities;
 
   return (
     <article className="card">
@@ -79,7 +80,7 @@ export default function RoommateCard({
             </p>
           )}
 
-          <span className="card__room">{roomLabel(room_capacity)}</span>
+          <span className="card__room">{roomLabel(room_capacities)}</span>
         </div>
       </div>
 

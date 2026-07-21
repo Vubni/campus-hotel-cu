@@ -110,6 +110,18 @@ def invite_keyboard(invite_id: int) -> dict:
     }
 
 
+def block_keyboard(request_id: int) -> dict:
+    """Кнопки под предложением объединиться в блок."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "🧩 Объединиться", "callback_data": f"block:{request_id}:yes"},
+                {"text": "✖️ Отказаться", "callback_data": f"block:{request_id}:no"},
+            ]
+        ]
+    }
+
+
 def vote_keyboard(request_id: int) -> dict:
     """Кнопки «Принять / Отклонить» под заявкой."""
     return {

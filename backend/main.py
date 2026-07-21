@@ -18,6 +18,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 import admin_export
+import block_flow
 import campuses
 import config
 import join_flow
@@ -133,6 +134,20 @@ def _assert_capacity_allowed(campus: str, capacity: int) -> None:
         )
 
 
+def _pack_lists(data: dict) -> None:
+    """Готовит поля-списки анкеты к записи: проверяет и склеивает через запятую.
+
+    Готовка и желаемые размеры комнаты приходят списками, а в колонках лежат
+    строками ("self,together", "3,4"). Заодно сверяем размеры с кампус-отелем:
+    в «Облаке» комнат на четверых нет, и фронт их не покажет — но запрос можно
+    отправить и мимо него.
+    """
+    for capacity in data.get("room_capacities") or []:
+        _assert_capacity_allowed(data["campus"], capacity)
+    data["room_capacities"] = ",".join(str(c) for c in data["room_capacities"])
+    data["cooking"] = ",".join(data["cooking"])
+
+
 def ensure_columns() -> None:
     """Мини-миграция: добавляем новые колонки, не теряя существующие анкеты.
 
@@ -174,10 +189,37 @@ def ensure_columns() -> None:
         # Возраст и курс больше не обязательны — их перестали собирать.
         conn.execute(text("ALTER TABLE profiles ALTER COLUMN age DROP NOT NULL"))
 
-        # NULL в room_capacity = «не предпочтительно».
+        # Блоки: комната знает, в каком блоке состоит (в «Облаке» — никогда).
         conn.execute(
-            text("ALTER TABLE profiles ALTER COLUMN room_capacity DROP NOT NULL")
+            text(
+                "ALTER TABLE groups ADD COLUMN IF NOT EXISTS block_id INTEGER "
+                "REFERENCES blocks(id)"
+            )
         )
+
+        # Один желаемый размер комнаты → несколько: «хочу 3 или 4, но не 2».
+        # Старое значение переносим как список из одного элемента, NULL
+        # («не предпочтительно») превращается в пустую строку — «не важно».
+        conn.execute(
+            text(
+                "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS room_capacities "
+                "VARCHAR(20) NOT NULL DEFAULT ''"
+            )
+        )
+        has_room_capacity = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'profiles' AND column_name = 'room_capacity'"
+            )
+        ).first()
+        if has_room_capacity:
+            conn.execute(
+                text(
+                    "UPDATE profiles SET room_capacities = room_capacity::text "
+                    "WHERE room_capacity IS NOT NULL AND room_capacities = ''"
+                )
+            )
+            conn.execute(text("ALTER TABLE profiles DROP COLUMN room_capacity"))
 
         # «О себе» — была в модели, но не в миграции: на базах, где таблица уже
         # существовала до этого поля, любой запрос к анкетам падал с ошибкой
@@ -495,7 +537,7 @@ def list_profiles(
     alcohol: Optional[str] = Query(None, pattern=schemas.ALCOHOL_PATTERN),
     search: Optional[str] = Query(None),
     without_group: Optional[bool] = Query(
-        None, description="true — только те, кто ещё не в компании"
+        None, description="true — только те, кто ещё не в комнате"
     ),
 ):
     query = db.query(models.Profile)
@@ -508,11 +550,14 @@ def list_profiles(
     elif without_group is False:
         query = query.filter(models.Profile.group_id.isnot(None))
     if room_capacity:
-        # Кому «не предпочтительно» (NULL) — подходит любой размер, поэтому
-        # такие анкеты показываем и при фильтре по конкретному числу.
+        # room_capacities — список через запятую ("3,4"). Обрамляем запятыми с
+        # обеих сторон, чтобы искать число целиком. Пустой список — «не важно»,
+        # подходит любой размер, поэтому такие анкеты показываем тоже.
         query = query.filter(
-            (models.Profile.room_capacity == room_capacity)
-            | (models.Profile.room_capacity.is_(None))
+            func.concat(",", models.Profile.room_capacities, ",").like(
+                f"%,{room_capacity},%"
+            )
+            | (models.Profile.room_capacities == "")
         )
     if smoking:
         query = query.filter(models.Profile.smoking == smoking)
@@ -618,12 +663,7 @@ def create_profile(payload: schemas.ProfileCreate, db: Session = Depends(get_db)
         if verified_user.get("username"):
             data["telegram"] = str(verified_user["username"]).lstrip("@")
 
-    # Предпочтение по размеру комнаты должно существовать в выбранном кампус-отеле.
-    if data.get("room_capacity"):
-        _assert_capacity_allowed(data["campus"], data["room_capacity"])
-
-    # Готовка приходит списком, а в колонке лежит строкой через запятую.
-    data["cooking"] = ",".join(data["cooking"])
+    _pack_lists(data)
 
     profile = models.Profile(**data)
     db.add(profile)
@@ -643,7 +683,7 @@ def update_profile(
     """Редактирование своей анкеты.
 
     Полноценной авторизации нет: правит тот, у кого в браузере сохранён id.
-    Пол не трогаем (он влияет на подбор компании), а подтверждённый через
+    Пол не трогаем (он влияет на подбор соседей), а подтверждённый через
     Telegram ник менять нельзя — иначе подтверждение потеряет смысл.
 
     Кампус-отель сменить можно, но это переезд: в чужом отеле и комната, и заявки,
@@ -660,9 +700,6 @@ def update_profile(
     else:
         data["telegram"] = payload.telegram.lstrip("@").strip()
 
-    if data.get("room_capacity"):
-        _assert_capacity_allowed(data["campus"], data["room_capacity"])
-
     msgs: List[dict] = []
     if data["campus"] != profile.campus:
         msgs = _remove_from_group(
@@ -670,8 +707,7 @@ def update_profile(
         )
         _close_pending(db, profile)
 
-    # Готовка — список значений, храним строкой через запятую.
-    data["cooking"] = ",".join(data["cooking"])
+    _pack_lists(data)
 
     for key, value in data.items():
         setattr(profile, key, value)
@@ -689,7 +725,7 @@ def delete_profile(
     db: Session = Depends(get_db),
     actor: Optional[models.Profile] = Depends(current_profile),
 ):
-    """Удаление своей анкеты: заодно выводим из компании и чистим заявки."""
+    """Удаление своей анкеты: заодно выводим из комнаты и чистим заявки."""
     _assert_is_me(actor, profile_id)
     profile = _get_profile_or_404(db, profile_id)
 
@@ -716,7 +752,7 @@ def _get_profile_or_404(db: Session, profile_id: int) -> models.Profile:
 def _get_group_or_404(db: Session, group_id: int) -> models.Group:
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Компания не найдена")
+        raise HTTPException(status_code=404, detail="Комната не найдена")
     return group
 
 
@@ -770,7 +806,7 @@ def _request_msgs(req: models.JoinRequest) -> List[dict]:
 
 
 def _decision_msgs(req: models.JoinRequest, status: str) -> List[dict]:
-    """Сообщаем автору заявки итог (приняли / отклонили / компания распалась)."""
+    """Сообщаем автору заявки итог (приняли / отклонили / комната распалась)."""
     profile = req.profile
     if not profile.telegram_chat_id:
         return []
@@ -793,9 +829,50 @@ def _decision_msgs(req: models.JoinRequest, status: str) -> List[dict]:
         ]
     if status == join_flow.CANCELLED:
         return [
-            _msg(profile.telegram_chat_id, "ℹ️ Заявка отменена: компания распалась.")
+            _msg(profile.telegram_chat_id, "ℹ️ Заявка отменена: комната распалась.")
         ]
     return []
+
+
+def _group_msgs(
+    group: models.Group, text: str, skip_id: Optional[int] = None
+) -> List[dict]:
+    """Одно и то же сообщение всем жильцам комнаты (кроме skip_id)."""
+    return [
+        _msg(m.telegram_chat_id, text)
+        for m in group.members
+        if m.telegram_chat_id and m.id != skip_id
+    ]
+
+
+def _close_group_blocks(db: Session, group: models.Group, note: str) -> List[dict]:
+    """Отвязывает комнату от блока и гасит её заявки на объединение.
+
+    Нужно, когда комната перестала подходить: распалась или изменила размер —
+    в блоке должно быть ровно 6 человек, и половинка от него не имеет смысла.
+    Сообщения не шлёт, а возвращает — их отправят в фоне после ответа клиенту.
+    """
+    msgs: List[dict] = []
+
+    block = group.block if group.block_id else None
+    if block is not None:
+        for other in block.groups:
+            if other.id != group.id:
+                msgs += _group_msgs(
+                    other,
+                    f"🧩 Ваш блок распался: {note}.\n"
+                    f"Можно объединиться с другой комнатой: {config.SITE_URL}",
+                )
+        block_flow.dissolve(db, block)
+
+    for req in block_flow.cancel_for_group(db, group):
+        other = req.to_group if req.from_group_id == group.id else req.from_group
+        if other.id != group.id:
+            msgs += _group_msgs(
+                other,
+                f"ℹ️ Предложение объединиться в блок отменено: {note}.",
+            )
+    return msgs
 
 
 def _remove_from_group(
@@ -840,6 +917,10 @@ def _remove_from_group(
         msgs += _decision_msgs(req, status)
 
     if not group.members:
+        # Комната распалась — вместе с ней уходит и её половина блока.
+        msgs += _close_group_blocks(
+            db, group, note=f"комната «на {group.capacity}» распалась"
+        )
         db.delete(group)
     return msgs
 
@@ -951,11 +1032,11 @@ def create_group(
     db: Session = Depends(get_db),
     actor: Optional[models.Profile] = Depends(current_profile),
 ):
-    """Создаёт компанию: автор сразу становится первым участником."""
+    """Создаёт комнату: автор сразу становится первым жильцом."""
     _assert_is_me(actor, payload.profile_id)
     profile = _get_profile_or_404(db, payload.profile_id)
     if profile.group_id:
-        raise HTTPException(status_code=409, detail="Ты уже состоишь в компании")
+        raise HTTPException(status_code=409, detail="Ты уже состоишь в комнате")
     _assert_capacity_allowed(profile.campus, payload.capacity)
 
     group = models.Group(
@@ -1036,9 +1117,9 @@ def create_join_request(
     profile = _get_profile_or_404(db, payload.profile_id)
 
     if profile.group_id == group.id:
-        raise HTTPException(status_code=409, detail="Ты уже в этой компании")
+        raise HTTPException(status_code=409, detail="Ты уже в этой комнате")
     if profile.group_id:
-        raise HTTPException(status_code=409, detail="Сначала выйди из текущей компании")
+        raise HTTPException(status_code=409, detail="Сначала выйди из текущей комнаты")
     if profile.gender != group.gender:
         raise HTTPException(
             status_code=403, detail="Парни живут с парнями, девушки — с девушками"
@@ -1049,7 +1130,7 @@ def create_join_request(
             detail=f"Эта комната в кампус-отеле «{campuses.label(group.campus)}»",
         )
     if group.spots_left <= 0:
-        raise HTTPException(status_code=409, detail="В компании больше нет мест")
+        raise HTTPException(status_code=409, detail="В комнате больше нет мест")
 
     existing = (
         db.query(models.JoinRequest)
@@ -1128,7 +1209,7 @@ def leave_group(
     group = _get_group_or_404(db, group_id)
     profile = _get_profile_or_404(db, payload.profile_id)
     if profile.group_id != group.id:
-        raise HTTPException(status_code=409, detail="Ты не состоишь в этой компании")
+        raise HTTPException(status_code=409, detail="Ты не состоишь в этой комнате")
 
     # Сообщения собираем до коммита, пока объекты в сессии.
     msgs = _remove_from_group(db, profile)
@@ -1148,7 +1229,7 @@ def change_group_capacity(
 ):
     """Сузить или расширить уже созданную комнату.
 
-    Собрались вчетвером, а набралось двое — не нужно распускать компанию и
+    Собрались вчетвером, а набралось двое — не нужно распускать комнату и
     собирать заново: комнату на 4 можно сделать комнатой на 2. Меняет любой
     жилец, остальные узнают об этом из Telegram.
     """
@@ -1159,6 +1240,16 @@ def change_group_capacity(
     if profile.group_id != group.id:
         raise HTTPException(
             status_code=403, detail="Размер комнаты меняют только те, кто в ней живёт"
+        )
+    # В блоке ровно 6 человек: изменить размер комнаты — значит сломать его.
+    # Сами блок не распускаем: это решение соседей, а не побочный эффект.
+    if group.block_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Комната в блоке — её размер зафиксирован. "
+                "Сначала выйдите из блока"
+            ),
         )
     _assert_capacity_allowed(group.campus, payload.capacity)
 
@@ -1188,7 +1279,11 @@ def change_group_capacity(
                 req.decided_at = datetime.utcnow()
                 rejected.append(req)
 
-    msgs: List[dict] = []
+    # Комната другого размера в прежний блок уже не складывается — висящие
+    # предложения объединиться пришлось бы всё равно отклонить при подсчёте.
+    msgs: List[dict] = _close_group_blocks(
+        db, group, note=f"комната стала на {payload.capacity}"
+    )
     for member in group.members:
         if member.id != profile.id and member.telegram_chat_id:
             msgs.append(
@@ -1233,12 +1328,12 @@ def _get_invite_or_404(db: Session, invite_id: int) -> models.GroupInvite:
 def _assert_invite_still_valid(invite: models.GroupInvite) -> None:
     """Между приглашением и согласием могло многое измениться.
 
-    Пока человек думал, любой из двоих мог вступить в другую компанию или
+    Пока человек думал, любой из двоих мог вступить в другую комнату или
     переехать в другой кампус-отель — тогда комнату создавать уже нельзя.
     """
     if invite.from_profile.group_id or invite.to_profile.group_id:
         raise HTTPException(
-            status_code=409, detail="Кто-то из вас уже успел вступить в компанию"
+            status_code=409, detail="Кто-то из вас уже успел вступить в комнату"
         )
     if invite.from_profile.campus != invite.to_profile.campus:
         raise HTTPException(
@@ -1348,9 +1443,9 @@ def create_invite(
         raise HTTPException(status_code=403, detail="Вы живёте в разных кампус-отелях")
     _assert_capacity_allowed(author.campus, payload.capacity)
     if author.group_id:
-        raise HTTPException(status_code=409, detail="Ты уже состоишь в компании")
+        raise HTTPException(status_code=409, detail="Ты уже состоишь в комнате")
     if target.group_id:
-        raise HTTPException(status_code=409, detail="Человек уже в компании")
+        raise HTTPException(status_code=409, detail="Человек уже в комнате")
 
     existing = (
         db.query(models.GroupInvite)
@@ -1438,6 +1533,337 @@ def cancel_invite(
     invite.status = "cancelled"
     invite.decided_at = datetime.utcnow()
     db.commit()
+    return None
+
+
+# ===== Блоки: две комнаты по 6 человек вместе =====
+# Только в «Диске»: 2+4 или 3+3. Комната зовёт комнату, соглашаются все жильцы
+# позванной — то же правило, что при вступлении в комнату.
+
+
+def _get_block_request_or_404(db: Session, request_id: int) -> models.BlockRequest:
+    req = (
+        db.query(models.BlockRequest)
+        .filter(models.BlockRequest.id == request_id)
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Заявка на блок не найдена")
+    return req
+
+
+def _my_group_or_403(
+    db: Session, profile_id: int, actor: Optional[models.Profile]
+) -> models.Group:
+    """Комната того, кто действует. Блоками распоряжаются жильцы комнат."""
+    _assert_is_me(actor, profile_id)
+    profile = _get_profile_or_404(db, profile_id)
+    if not profile.group_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Сначала соберите комнату — в блок объединяются комнатами",
+        )
+    return _get_group_or_404(db, profile.group_id)
+
+
+def _block_request_out(req: models.BlockRequest) -> schemas.BlockRequestOut:
+    votes = block_flow.active_votes(req)
+    return schemas.BlockRequestOut(
+        id=req.id,
+        from_group_id=req.from_group_id,
+        to_group_id=req.to_group_id,
+        status=req.status,
+        created_at=req.created_at,
+        from_group=schemas.BlockRoomOut.model_validate(req.from_group),
+        to_group=schemas.BlockRoomOut.model_validate(req.to_group),
+        votes_needed=block_flow.votes_needed(req),
+        votes_done=block_flow.votes_done(req),
+        approved_by=[mid for mid, ok in votes.items() if ok],
+    )
+
+
+def _room_name(group: models.Group) -> str:
+    """«Комната на 4 (Аня, Лена)» — чтобы понять, кого зовут, прямо в Telegram."""
+    who = ", ".join(m.name for m in group.members)
+    return f"комната на {group.capacity}" + (f" ({who})" if who else "")
+
+
+@app.get(
+    "/api/blocks",
+    response_model=List[schemas.BlockOut],
+    dependencies=[Depends(telegram_user)],
+)
+def list_blocks(
+    db: Session = Depends(get_db),
+    gender: Optional[str] = Query(None, pattern="^(male|female|other)$"),
+    campus: Optional[str] = Query(None, pattern=campuses.PATTERN),
+):
+    """Уже собранные блоки — посмотреть, кто с кем объединился."""
+    query = db.query(models.Block)
+    if gender:
+        query = query.filter(models.Block.gender == gender)
+    if campus:
+        query = query.filter(models.Block.campus == campus)
+    return query.order_by(models.Block.created_at.desc()).all()
+
+
+@app.get(
+    "/api/groups/{group_id}/block-candidates",
+    response_model=List[schemas.BlockRoomOut],
+    dependencies=[Depends(telegram_user)],
+)
+def list_block_candidates(group_id: int, db: Session = Depends(get_db)):
+    """Комнаты, с которыми эта соберёт полный блок.
+
+    Подбираем по размеру: комнате на 4 нужна комната на 2, комнате на 3 — на 3.
+    Занятость людьми не важна — блок делят комнаты, а не отдельные жильцы.
+    """
+    group = _get_group_or_404(db, group_id)
+    partner = campuses.block_partner(group.campus, group.capacity)
+    if partner is None or group.block_id:
+        return []
+
+    return (
+        db.query(models.Group)
+        .filter(
+            models.Group.id != group.id,
+            models.Group.campus == group.campus,
+            models.Group.gender == group.gender,
+            models.Group.capacity == partner,
+            models.Group.block_id.is_(None),
+        )
+        .order_by(models.Group.created_at.desc())
+        .all()
+    )
+
+
+@app.get(
+    "/api/groups/{group_id}/block-requests",
+    response_model=List[schemas.BlockRequestOut],
+)
+def list_block_requests(
+    group_id: int,
+    db: Session = Depends(get_db),
+    status: Optional[str] = Query("pending"),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    """Заявки на блок этой комнаты — и входящие, и исходящие.
+
+    Дело внутреннее: смотреть их могут только жильцы самой комнаты.
+    """
+    group = _get_group_or_404(db, group_id)
+    if actor is not None and actor.group_id != group.id:
+        raise HTTPException(status_code=403, detail="Это не твоя комната")
+
+    query = db.query(models.BlockRequest).filter(
+        (models.BlockRequest.from_group_id == group.id)
+        | (models.BlockRequest.to_group_id == group.id)
+    )
+    if status:
+        query = query.filter(models.BlockRequest.status == status)
+    reqs = query.order_by(models.BlockRequest.created_at).all()
+    return [_block_request_out(r) for r in reqs]
+
+
+@app.post(
+    "/api/blocks/requests",
+    response_model=schemas.BlockRequestOut,
+    status_code=201,
+)
+def create_block_request(
+    payload: schemas.BlockRequestCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    """Позвать другую комнату в блок. Блок появится только после согласия."""
+    group = _my_group_or_403(db, payload.profile_id, actor)
+    other = _get_group_or_404(db, payload.to_group_id)
+
+    problem = block_flow.pair_problem(group, other)
+    if problem:
+        raise HTTPException(status_code=409, detail=problem)
+
+    existing = (
+        db.query(models.BlockRequest)
+        .filter(
+            models.BlockRequest.status == block_flow.PENDING,
+            models.BlockRequest.from_group_id == group.id,
+            models.BlockRequest.to_group_id == other.id,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Предложение уже отправлено")
+
+    req = models.BlockRequest(from_group_id=group.id, to_group_id=other.id)
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+
+    msgs = _group_msgs(
+        other,
+        f"🧩 <b>{_room_name(group)}</b> зовёт вас в блок — "
+        f"{group.capacity}+{other.capacity}, всего {campuses.BLOCK_SIZE} человек.\n\n"
+        f"Нужно согласие всех, кто живёт в вашей комнате "
+        f"({block_flow.votes_needed(req)}).",
+        # Кнопки под сообщением: голосовать можно, не открывая приложение.
+    )
+    for msg in msgs:
+        msg["reply_markup"] = notifier.block_keyboard(req.id)
+
+    background_tasks.add_task(notifier.deliver, msgs)
+    return _block_request_out(req)
+
+
+@app.post(
+    "/api/blocks/requests/{request_id}/vote",
+    response_model=schemas.BlockRequestOut,
+)
+def vote_block_request(
+    request_id: int,
+    payload: schemas.BlockRequestVoteIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    _assert_is_me(actor, payload.profile_id)
+    req = _get_block_request_or_404(db, request_id)
+    voter = _get_profile_or_404(db, payload.profile_id)
+
+    if req.status != block_flow.PENDING:
+        raise HTTPException(status_code=409, detail="Заявка на блок уже закрыта")
+    if voter.group_id != req.to_group_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Решают только жильцы комнаты, которую позвали",
+        )
+
+    _status, msgs = _apply_block_vote(db, req, voter, payload.approve)
+    background_tasks.add_task(notifier.deliver, msgs)
+    db.refresh(req)
+    return _block_request_out(req)
+
+
+def _apply_block_vote(
+    db: Session, req: models.BlockRequest, voter: models.Profile, approve: bool
+) -> tuple[str, List[dict]]:
+    """Записывает голос, пересчитывает статус и СОБИРАЕТ уведомления.
+
+    Как и у заявок в комнату, сообщения не шлёт: их отправят в фоне уже после
+    ответа клиенту.
+    """
+    vote = (
+        db.query(models.BlockRequestVote)
+        .filter(
+            models.BlockRequestVote.request_id == req.id,
+            models.BlockRequestVote.member_id == voter.id,
+        )
+        .first()
+    )
+    if vote:
+        vote.approve = approve  # передумал — перезаписываем
+    else:
+        db.add(
+            models.BlockRequestVote(
+                request_id=req.id, member_id=voter.id, approve=approve
+            )
+        )
+    db.flush()
+    db.refresh(req)
+
+    status = block_flow.evaluate(db, req)
+    also_closed: List[models.BlockRequest] = []
+    if status == block_flow.APPROVED:
+        also_closed = block_flow.close_obsolete(
+            db, [req.from_group, req.to_group], keep=req
+        )
+    db.commit()
+    db.refresh(req)
+
+    msgs: List[dict] = []
+    if status == block_flow.APPROVED:
+        for group, other in ((req.from_group, req.to_group), (req.to_group, req.from_group)):
+            msgs += _group_msgs(
+                group,
+                f"🧩 Блок собран! Ваши соседи по блоку — <b>{_room_name(other)}</b>.\n"
+                f"{config.SITE_URL}",
+            )
+        for other_req in also_closed:
+            # Обе стороны несостоявшегося блока ждали ответа — говорим обеим.
+            for group in (other_req.from_group, other_req.to_group):
+                msgs += _group_msgs(
+                    group,
+                    "ℹ️ Предложение про блок отменено: комната успела "
+                    "объединиться с другой.",
+                )
+    elif status == block_flow.REJECTED:
+        msgs += _group_msgs(
+            req.from_group,
+            f"😔 <b>{_room_name(req.to_group)}</b> отказалась объединяться в блок. "
+            f"Есть другие комнаты: {config.SITE_URL}",
+        )
+    return status, msgs
+
+
+@app.post("/api/blocks/requests/{request_id}/cancel", status_code=204)
+def cancel_block_request(
+    request_id: int,
+    payload: schemas.BlockMembership,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    """Отозвать своё предложение о блоке. Может любой жилец звавшей комнаты."""
+    _assert_is_me(actor, payload.profile_id)
+    req = _get_block_request_or_404(db, request_id)
+    profile = _get_profile_or_404(db, payload.profile_id)
+
+    if profile.group_id != req.from_group_id:
+        raise HTTPException(status_code=403, detail="Это не твоё предложение")
+    if req.status != block_flow.PENDING:
+        raise HTTPException(status_code=409, detail="Заявка на блок уже закрыта")
+
+    req.status = block_flow.CANCELLED
+    req.decided_at = datetime.utcnow()
+    db.commit()
+    return None
+
+
+@app.post("/api/blocks/{block_id}/leave", status_code=204)
+def leave_block(
+    block_id: int,
+    payload: schemas.BlockMembership,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    actor: Optional[models.Profile] = Depends(current_profile),
+):
+    """Выйти из блока своей комнатой.
+
+    Блок из одной комнаты не существует, поэтому выход распускает его целиком:
+    обе комнаты снова свободны и могут искать других соседей по блоку.
+    """
+    _assert_is_me(actor, payload.profile_id)
+    block = db.query(models.Block).filter(models.Block.id == block_id).first()
+    if not block:
+        raise HTTPException(status_code=404, detail="Блок не найден")
+
+    profile = _get_profile_or_404(db, payload.profile_id)
+    group = profile.group if profile.group_id else None
+    if group is None or group.block_id != block.id:
+        raise HTTPException(status_code=403, detail="Твоя комната не в этом блоке")
+
+    msgs: List[dict] = []
+    for other in block.groups:
+        if other.id != group.id:
+            msgs += _group_msgs(
+                other,
+                f"🚪 <b>{_room_name(group)}</b> вышла из вашего блока.\n"
+                f"Можно объединиться с другой комнатой: {config.SITE_URL}",
+            )
+    block_flow.dissolve(db, block)
+    db.commit()
+
+    background_tasks.add_task(notifier.deliver, msgs)
     return None
 
 
@@ -1595,6 +2021,36 @@ def bot_invite_respond(
     }
 
 
+@app.post("/api/bot/block", dependencies=[Depends(_check_bot_secret)])
+def bot_block_vote(
+    payload: schemas.BotBlockVote,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Голос по предложению объединиться в блок — кнопкой в боте."""
+    profile = _find_profile_by_telegram(db, payload.telegram_id, None)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Анкета не найдена")
+
+    req = _get_block_request_or_404(db, payload.request_id)
+    if req.status != block_flow.PENDING:
+        raise HTTPException(status_code=409, detail="Заявка на блок уже закрыта")
+    if profile.group_id != req.to_group_id:
+        raise HTTPException(
+            status_code=403, detail="Решают только жильцы комнаты, которую позвали"
+        )
+
+    status, msgs = _apply_block_vote(db, req, profile, payload.approve)
+    background_tasks.add_task(notifier.deliver, msgs)
+    db.refresh(req)
+    return {
+        "status": status,
+        "votes_done": block_flow.votes_done(req),
+        "votes_needed": block_flow.votes_needed(req),
+        "who": _room_name(req.from_group),
+    }
+
+
 # ===== Админка =====
 # Выгрузка чужих персональных данных, поэтому за require_admin: подпись
 # Telegram должна принадлежать одному из владельцев сервиса.
@@ -1623,6 +2079,7 @@ def admin_stats(response: Response, db: Session = Depends(get_db)):
         with_bot=len([p for p in profiles if p.telegram_chat_id]),
         groups=len(groups),
         in_groups=len([p for p in profiles if p.group_id]),
+        blocks=db.query(models.Block).count(),
         by_campus=by_campus,
     )
 

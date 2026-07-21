@@ -161,6 +161,48 @@ async def on_invite(call: CallbackQuery):
     await call.message.edit_text(f"{call.message.html_text}\n\n{tail}")
 
 
+@dp.callback_query(F.data.startswith("block:"))
+async def on_block(call: CallbackQuery):
+    """Объединение комнат в блок: решают все жильцы позванной комнаты."""
+    _, request_id, decision = call.data.split(":")
+    approve = decision == "yes"
+
+    async with api_client() as client:
+        try:
+            resp = await client.post(
+                "/api/bot/block",
+                json={
+                    "telegram_id": call.from_user.id,
+                    "request_id": int(request_id),
+                    "approve": approve,
+                },
+            )
+        except httpx.HTTPError:
+            await call.answer("Сайт недоступен, попробуй позже", show_alert=True)
+            return
+
+    if resp.status_code != 200:
+        detail = resp.json().get("detail", "Не получилось")
+        await call.answer(detail, show_alert=True)
+        if resp.status_code == 409:
+            await call.message.edit_reply_markup(reply_markup=None)
+        return
+
+    data = resp.json()
+    if data["status"] == "approved":
+        tail = "🧩 Блок собран — все согласились."
+    elif data["status"] == "rejected":
+        tail = "✖️ Объединение в блок отклонено."
+    else:
+        tail = (
+            f"Твой голос учтён: {data['votes_done']} из {data['votes_needed']}. "
+            "Ждём остальных из твоей комнаты."
+        )
+
+    await call.answer("Готово")
+    await call.message.edit_text(f"{call.message.html_text}\n\n{tail}")
+
+
 @dp.callback_query(F.data.startswith("vote:"))
 async def on_vote(call: CallbackQuery):
     _, request_id, decision = call.data.split(":")

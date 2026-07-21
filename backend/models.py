@@ -12,13 +12,41 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+import campuses
 from database import Base
 
 
-class Group(Base):
-    """Компания — просто группа людей, которые решили жить вместе.
+class Block(Base):
+    """Блок — две комнаты с общим входом, всего на 6 человек.
 
-    Никаких секций и номеров комнат: capacity — это на сколько человек комната,
+    Бывает только в «Диске» (см. campuses.py). Сочетания ровно два: 2+4 и 3+3,
+    поэтому в собранном блоке всегда две комнаты — третью уже не вместить.
+    """
+
+    __tablename__ = "blocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Пол блока: соседи по блоку делят вход, поэтому правило то же, что у комнат.
+    gender = Column(String(20), nullable=False)
+    campus = Column(String(20), nullable=False, default="disk")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    groups = relationship("Group", back_populates="block")
+
+    @property
+    def taken(self) -> int:
+        """Сколько мест блока уже разобрано комнатами (не людьми)."""
+        return sum(g.capacity for g in self.groups)
+
+    @property
+    def spots_left(self) -> int:
+        return campuses.BLOCK_SIZE - self.taken
+
+
+class Group(Base):
+    """Комната — группа людей, которые решили жить вместе.
+
+    Никаких секций и номеров: capacity — это на сколько человек комната,
     а свободные места = capacity - число участников.
     """
 
@@ -27,14 +55,17 @@ class Group(Base):
     id = Column(Integer, primary_key=True, index=True)
     # Сколько человек в комнате. Допустимые значения зависят от кампус-отеля:
     # в «Диске» 2–4, в «Облаке» 2–3 (см. campuses.py). Меняется и после
-    # создания — компания на 4 может ужаться до 2, если больше не набралось.
+    # создания — комната на 4 может ужаться до 2, если больше не набралось.
     capacity = Column(Integer, nullable=False, default=3)
-    # Пол компании: парни живут с парнями, девушки — с девушками.
+    # Пол комнаты: парни живут с парнями, девушки — с девушками.
     gender = Column(String(20), nullable=False)
     # Кампус-отель: disk | cloud. Комнаты разных отелей не смешиваются.
     campus = Column(String(20), nullable=False, default="disk")
+    # Блок, в который комната объединилась с другой. Пусто — блока пока нет.
+    block_id = Column(Integer, ForeignKey("blocks.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    block = relationship("Block", back_populates="groups")
     members = relationship("Profile", back_populates="group")
     requests = relationship(
         "JoinRequest", back_populates="group", cascade="all, delete-orphan"
@@ -67,11 +98,11 @@ class Profile(Base):
     # Появляется после /start у бота — только тогда можно слать уведомления.
     telegram_chat_id = Column(BigInteger, nullable=True)
 
-    # Пусто — человек ищет соседей сам по себе; заполнено — уже в компании.
+    # Пусто — человек ищет соседей сам по себе; заполнено — уже в комнате.
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=True)
     group = relationship("Group", back_populates="members")
 
-    # Ниже "" (и NULL у course/room_capacity) означает «не выбрано»: человек
+    # Ниже "" означает «не выбрано»: человек
     # ещё не ответил, и мы не показываем характеристику вместо того, чтобы
     # подставлять выдуманное значение.
     # Направление: dev | business | design | ai | undecided | ""
@@ -79,9 +110,10 @@ class Profile(Base):
     course = Column(Integer, nullable=False, default=1)  # курс 1..4, по умолчанию 1
     bio = Column(Text, nullable=False, default="")
 
-    # 2, 3, 4 или NULL — «не предпочтительно», подойдёт любая комната.
-    # Без default: SQLAlchemy подставляет его вместо None, и NULL было бы не задать.
-    room_capacity = Column(Integer, nullable=True)
+    # Желаемые размеры комнаты — можно выбрать несколько: «хочу 3 или 4, но не
+    # двухместную». Храним как список через запятую ("3,4"), "" — «не важно»,
+    # подойдёт любая. Пришло на смену одиночному room_capacity.
+    room_capacities = Column(String(20), nullable=False, default="")
     sleep_schedule = Column(String(20), nullable=False, default="")  # lark | owl | any
     smoking = Column(String(20), nullable=False, default="")  # yes | no | vape
     # Аккуратность (бывшая «чистоплотность»): relaxed | medium | neat
@@ -106,7 +138,7 @@ class Profile(Base):
 
 
 class JoinRequest(Base):
-    """Заявка на вступление в компанию.
+    """Заявка на вступление в комнату.
 
     Человек не попадает в комнату сам: заявку должны подтвердить ВСЕ, кто уже
     в ней. Любой отказ — заявка отклонена.
@@ -134,7 +166,7 @@ class JoinRequest(Base):
 
 
 class GroupInvite(Base):
-    """Приглашение собрать компанию прямо из ленты анкет.
+    """Приглашение собрать комнату прямо из ленты анкет.
 
     Комната НЕ создаётся в момент приглашения: пока позванный не согласится,
     существует только запись-приглашение. Согласился — создаём группу и кладём
@@ -176,4 +208,52 @@ class JoinRequestVote(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     request = relationship("JoinRequest", back_populates="votes")
+    member = relationship("Profile", foreign_keys=[member_id])
+
+
+class BlockRequest(Base):
+    """Заявка одной комнаты объединиться в блок с другой.
+
+    Блок появляется не сразу: предложение должны подтвердить ВСЕ жильцы
+    комнаты, которую позвали. Любой отказ — заявка отклонена. Устроено так же,
+    как вступление в комнату, только решают целой комнатой, а не поодиночке.
+    """
+
+    __tablename__ = "block_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    from_group_id = Column(
+        Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False
+    )
+    to_group_id = Column(
+        Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False
+    )
+    # pending | approved | rejected | cancelled
+    status = Column(String(20), nullable=False, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    decided_at = Column(DateTime, nullable=True)
+
+    from_group = relationship("Group", foreign_keys=[from_group_id])
+    to_group = relationship("Group", foreign_keys=[to_group_id])
+    votes = relationship(
+        "BlockRequestVote", back_populates="request", cascade="all, delete-orphan"
+    )
+
+
+class BlockRequestVote(Base):
+    """Голос жильца позванной комнаты по заявке на блок."""
+
+    __tablename__ = "block_request_votes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(
+        Integer, ForeignKey("block_requests.id", ondelete="CASCADE"), nullable=False
+    )
+    member_id = Column(
+        Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    approve = Column(Boolean, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    request = relationship("BlockRequest", back_populates="votes")
     member = relationship("Profile", foreign_keys=[member_id])

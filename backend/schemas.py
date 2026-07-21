@@ -25,6 +25,39 @@ COOKING_VALUES = ("self", "together", "delivery")
 # Для фильтра: одно значение из списка готовки.
 COOKING_ITEM_PATTERN = "^(self|together|delivery)$"
 
+# Размеры комнат, какие вообще бывают (конкретный набор зависит от кампус-отеля,
+# см. campuses.py). Пустой список — «не важно», подойдёт любая.
+ROOM_CAPACITY_VALUES = (2, 3, 4)
+
+
+def normalize_room_capacities(value) -> List[int]:
+    """Желаемых размеров комнаты может быть несколько: «3 или 4, но не 2».
+
+    Принимаем список или строку через запятую (как хранится в БД), чистим от
+    мусора и дублей, сортируем. Пустой список — «не важно», это допустимо.
+    Отдельно понимаем None и одиночное число: так приходят старые анкеты,
+    у которых было единственное room_capacity.
+    """
+    if value is None or value == "":
+        items = []
+    elif isinstance(value, int):
+        items = [value]
+    elif isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        items = list(value)
+    else:
+        items = []
+    result: List[int] = []
+    for item in items:
+        try:
+            number = int(str(item).strip())
+        except ValueError:
+            continue
+        if number in ROOM_CAPACITY_VALUES and number not in result:
+            result.append(number)
+    return sorted(result)
+
 
 def normalize_cooking(value) -> List[str]:
     """Готовка допускает несколько вариантов. Принимаем список или строку
@@ -62,8 +95,9 @@ class ProfileBase(BaseModel):
     course: int = Field(1, ge=1, le=4)
     bio: str = ""
 
-    # None — «не предпочтительно»: подойдёт комната любого размера.
-    room_capacity: Optional[int] = Field(None, ge=2, le=4)
+    # Можно выбрать несколько размеров сразу: «хочу 3 или 4, но не двухместную».
+    # Пустой список — «не важно»: подойдёт комната любого размера.
+    room_capacities: List[int] = Field(default_factory=list)
     sleep_schedule: str = Field(UNSET, pattern=SLEEP_PATTERN)
     smoking: str = Field(UNSET, pattern=SMOKING_PATTERN)
     tidiness: str = Field(UNSET, pattern=TIDINESS_PATTERN)
@@ -81,6 +115,11 @@ class ProfileBase(BaseModel):
     @classmethod
     def _validate_cooking(cls, value):
         return normalize_cooking(value)
+
+    @field_validator("room_capacities", mode="before")
+    @classmethod
+    def _validate_room_capacities(cls, value):
+        return normalize_room_capacities(value)
 
 
 class ProfileCreate(ProfileBase):
@@ -109,9 +148,9 @@ class ProfileOut(ProfileBase):
 
 
 class GroupMemberOut(BaseModel):
-    """Карточка участника компании.
+    """Карточка жильца комнаты.
 
-    Помимо краткой части несёт бытовые поля — чтобы в разделе «Компании» можно
+    Помимо краткой части несёт бытовые поля — чтобы в разделе «Комнаты» можно
     было раскрыть участника и решить, стоит ли к нему проситься.
     """
 
@@ -124,7 +163,7 @@ class GroupMemberOut(BaseModel):
 
     course: int = 1
     bio: str = ""
-    room_capacity: Optional[int] = None
+    room_capacities: List[int] = Field(default_factory=list)
     sleep_schedule: str = UNSET
     smoking: str = UNSET
     tidiness: str = UNSET
@@ -141,6 +180,11 @@ class GroupMemberOut(BaseModel):
     def _validate_cooking(cls, value):
         return normalize_cooking(value)
 
+    @field_validator("room_capacities", mode="before")
+    @classmethod
+    def _validate_room_capacities(cls, value):
+        return normalize_room_capacities(value)
+
     class Config:
         from_attributes = True
 
@@ -153,9 +197,76 @@ class GroupOut(BaseModel):
     created_at: datetime
     members: List[GroupMemberOut] = []
     spots_left: int
+    # Блок, в котором комната состоит. None — пока сама по себе.
+    block_id: Optional[int] = None
 
     class Config:
         from_attributes = True
+
+
+class BlockRoomOut(BaseModel):
+    """Комната глазами блока: состав целиком, но без вложенного блока.
+
+    Без отдельной схемы GroupOut ссылался бы на BlockOut, а тот — обратно на
+    GroupOut, и получилась бы бесконечная вложенность.
+    """
+
+    id: int
+    capacity: int
+    gender: str
+    campus: str = campuses.DEFAULT
+    created_at: datetime
+    members: List[GroupMemberOut] = []
+    spots_left: int
+
+    class Config:
+        from_attributes = True
+
+
+class BlockOut(BaseModel):
+    id: int
+    gender: str
+    campus: str = campuses.DEFAULT
+    created_at: datetime
+    groups: List[BlockRoomOut] = []
+    # Сколько мест блока разобрано комнатами и сколько осталось (из 6).
+    taken: int
+    spots_left: int
+
+    class Config:
+        from_attributes = True
+
+
+class BlockRequestOut(BaseModel):
+    """Предложение объединиться в блок — как его видят обе стороны."""
+
+    id: int
+    from_group_id: int
+    to_group_id: int
+    status: str
+    created_at: datetime
+    from_group: BlockRoomOut
+    to_group: BlockRoomOut
+    votes_needed: int  # сколько жильцов позванной комнаты должны согласиться
+    votes_done: int
+    approved_by: List[int] = []
+
+    class Config:
+        from_attributes = True
+
+
+class BlockRequestCreate(BaseModel):
+    profile_id: int  # кто зовёт (должен жить в своей комнате)
+    to_group_id: int  # какую комнату зовём в блок
+
+
+class BlockRequestVoteIn(BaseModel):
+    profile_id: int  # кто голосует (должен жить в позванной комнате)
+    approve: bool
+
+
+class BlockMembership(BaseModel):
+    profile_id: int
 
 
 class GroupCreate(BaseModel):
@@ -232,6 +343,14 @@ class BotInviteRespond(BaseModel):
     telegram_id: int
     invite_id: int
     accept: bool
+
+
+class BotBlockVote(BaseModel):
+    """Голос по заявке на блок кнопкой в боте."""
+
+    telegram_id: int
+    request_id: int
+    approve: bool
 
 
 class TelegramWidgetAuth(BaseModel):
@@ -315,5 +434,6 @@ class AdminStatsOut(BaseModel):
     with_username: int  # у скольких известен ник (по нему и пишут)
     with_bot: int  # сколько нажали /start — до них дойдут уведомления
     groups: int
-    in_groups: int  # сколько человек уже живут в компаниях
+    in_groups: int  # сколько человек уже живут в комнатах
+    blocks: int = 0  # сколько комнат объединились в блоки (пар)
     by_campus: Dict[str, int]

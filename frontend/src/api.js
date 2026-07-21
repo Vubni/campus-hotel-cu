@@ -51,7 +51,7 @@ export async function fetchGroups(filters = {}) {
   const res = await fetch(`${BASE}/groups${qs ? `?${qs}` : ""}`, {
     headers: authHeaders(),
   });
-  return jsonOrThrow(res, "Не удалось загрузить компании");
+  return jsonOrThrow(res, "Не удалось загрузить комнаты");
 }
 
 export async function createGroup(capacity, profileId) {
@@ -60,7 +60,7 @@ export async function createGroup(capacity, profileId) {
     headers: JSON_HEADERS(),
     body: JSON.stringify({ capacity, profile_id: profileId }),
   });
-  return jsonOrThrow(res, "Не удалось создать компанию");
+  return jsonOrThrow(res, "Не удалось создать комнату");
 }
 
 // Вступить напрямую нельзя — только подать заявку, её подтверждают жильцы.
@@ -120,7 +120,75 @@ export async function leaveGroup(groupId, profileId) {
     headers: JSON_HEADERS(),
     body: JSON.stringify({ profile_id: profileId }),
   });
-  return jsonOrThrow(res, "Не удалось выйти из компании");
+  return jsonOrThrow(res, "Не удалось выйти из комнаты");
+}
+
+// ===== Блоки: две комнаты по 6 человек вместе (2+4 или 3+3) =====
+
+export async function fetchBlocks(filters = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== "" && value !== null && value !== undefined) {
+      params.append(key, value);
+    }
+  }
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/blocks${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
+  return jsonOrThrow(res, "Не удалось загрузить блоки");
+}
+
+/** Комнаты, с которыми моя соберёт полный блок — подбирает сервер по размеру. */
+export async function fetchBlockCandidates(groupId) {
+  const res = await fetch(`${BASE}/groups/${groupId}/block-candidates`, {
+    headers: authHeaders(),
+  });
+  return jsonOrThrow(res, "Не удалось загрузить комнаты для блока");
+}
+
+/** Заявки на блок моей комнаты — и входящие, и исходящие. */
+export async function fetchBlockRequests(groupId) {
+  const res = await fetch(`${BASE}/groups/${groupId}/block-requests?status=pending`, {
+    headers: authHeaders(),
+  });
+  return jsonOrThrow(res, "Не удалось загрузить заявки на блок");
+}
+
+export async function requestBlock(profileId, toGroupId) {
+  const res = await fetch(`${BASE}/blocks/requests`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ profile_id: profileId, to_group_id: toGroupId }),
+  });
+  return jsonOrThrow(res, "Не удалось позвать комнату в блок");
+}
+
+export async function voteBlockRequest(requestId, profileId, approve) {
+  const res = await fetch(`${BASE}/blocks/requests/${requestId}/vote`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ profile_id: profileId, approve }),
+  });
+  return jsonOrThrow(res, "Не удалось ответить на предложение");
+}
+
+export async function cancelBlockRequest(requestId, profileId) {
+  const res = await fetch(`${BASE}/blocks/requests/${requestId}/cancel`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ profile_id: profileId }),
+  });
+  return jsonOrThrow(res, "Не удалось отменить предложение");
+}
+
+export async function leaveBlock(blockId, profileId) {
+  const res = await fetch(`${BASE}/blocks/${blockId}/leave`, {
+    method: "POST",
+    headers: JSON_HEADERS(),
+    body: JSON.stringify({ profile_id: profileId }),
+  });
+  return jsonOrThrow(res, "Не удалось выйти из блока");
 }
 
 /**

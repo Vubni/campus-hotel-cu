@@ -96,7 +96,7 @@ def close_obsolete(db: Session, profile: models.Profile, group: models.Group) ->
         req.status = CANCELLED
         req.decided_at = datetime.utcnow()
 
-    # Если мест не осталось — остальным в эту компанию отказываем.
+    # Если мест не осталось — остальным в эту комнату отказываем.
     if group.spots_left <= 0:
         pending = (
             db.query(models.JoinRequest)

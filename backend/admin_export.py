@@ -2,7 +2,7 @@
 
 Два листа (в CSV — два файла, в JSON — два массива):
   * «Пользователи» — все анкеты с Telegram ID и никами;
-  * «Комнаты» — состав компаний, по строке на каждого жильца: так удобно
+  * «Комнаты» — состав комнат, по строке на каждого жильца: так удобно
     фильтровать и сводить в Excel.
 
 Два режима: full — со всеми параметрами анкеты, short — только имя, ник и ID,
@@ -66,6 +66,14 @@ def _cooking(value: str) -> str:
     return ", ".join(items) if items else UNSET
 
 
+def _room_capacities(value: str) -> str:
+    """«3 или 4» — желаемых размеров комнаты может быть несколько."""
+    items = [part.strip() for part in (value or "").split(",") if part.strip()]
+    if not items:
+        return "Не важно"
+    return " или ".join(items)
+
+
 def _when(value: Optional[datetime]) -> str:
     return value.strftime("%d.%m.%Y %H:%M") if value else ""
 
@@ -103,6 +111,7 @@ def users_table(profiles: List[models.Profile], scope: str) -> tuple[list, list]
         "Направление",
         "Хочет комнату на",
         "Комната №",
+        "Блок №",
         "Соседи",
         "Режим сна",
         "Подъём",
@@ -138,8 +147,9 @@ def users_table(profiles: List[models.Profile], scope: str) -> tuple[list, list]
                 _label(GENDER, p.gender),
                 p.course or UNSET,
                 _label(TRACK, p.track),
-                p.room_capacity or "Не важно",
+                _room_capacities(p.room_capacities),
                 p.group_id or "",
+                (p.group.block_id if p.group_id and p.group else None) or "",
                 mates or UNSET,
                 _label(SLEEP, p.sleep_schedule),
                 _label(WAKEUP, p.wakeup),
@@ -181,6 +191,8 @@ def rooms_table(groups: List[models.Group], scope: str) -> tuple[list, list]:
 
     headers = [
         "Комната №",
+        "Блок №",
+        "Соседи по блоку",
         "Кампус-отель",
         "Пол",
         "Размер",
@@ -198,10 +210,23 @@ def rooms_table(groups: List[models.Group], scope: str) -> tuple[list, list]:
     rows = []
     for group in ordered:
         taken = len(group.members)
+        # Соседи по блоку — вторая комната блока: с ней делят общий вход.
+        neighbours = (
+            ", ".join(
+                m.name
+                for other in group.block.groups
+                if other.id != group.id
+                for m in other.members
+            )
+            if group.block_id and group.block
+            else ""
+        )
         for member in group.members:
             rows.append(
                 [
                     group.id,
+                    group.block_id or "",
+                    neighbours or UNSET,
                     campuses.label(group.campus),
                     _label(GENDER, group.gender),
                     group.capacity,
