@@ -26,26 +26,31 @@ SITE_URL = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
 TELEGRAM_MINIAPP_SHORT_NAME = os.getenv("TELEGRAM_MINIAPP_SHORT_NAME", "").strip()
 
 
-def _supergroup_chat_id(raw: str) -> Optional[int]:
-    """Chat id супергруппы из переменной окружения.
+def _feed_chat(raw: str) -> Optional[str | int]:
+    """Чат ленты: либо публичный ник (@name), либо числовой id.
 
-    Telegram показывает id супергруппы и без префикса «-100» (например, в
-    ссылках и в сторонних клиентах), а Bot API принимает только полный вид.
-    Чтобы не ловить «chat not found» из-за формата, дописываем префикс сами.
+    Ник надёжнее: его видно в ссылке на группу и не надо гадать про формат id.
+    Числовой id Telegram показывает и без префикса «-100» (в ссылках и сторонних
+    клиентах), а Bot API принимает только полный вид — дописываем префикс сами,
+    иначе получили бы «chat not found» на ровном месте.
     """
     raw = raw.strip()
-    if not raw.lstrip("-").isdigit():
+    if not raw:
         return None
+    if raw.startswith("@"):
+        return raw
+    if not raw.lstrip("-").isdigit():
+        # Ник без «@» — тоже понятный случай, но отличить его от опечатки
+        # нельзя, поэтому требуем «@» явно.
+        return f"@{raw}"
     value = int(raw)
-    if value > 0:
-        return int(f"-100{value}")
-    return value
+    return int(f"-100{value}") if value > 0 else value
 
 
 # Общая лента: чат, куда бот пишет о каждой новой анкете. Это супергруппа с
 # темами, поэтому кроме чата нужен и номер темы (message_thread_id) — без него
 # сообщение упадёт в «General». Пусто — в ленту просто ничего не пишем.
-FEED_CHAT_ID = _supergroup_chat_id(os.getenv("TELEGRAM_FEED_CHAT_ID", ""))
+FEED_CHAT_ID = _feed_chat(os.getenv("TELEGRAM_FEED_CHAT_ID", ""))
 _feed_thread = os.getenv("TELEGRAM_FEED_THREAD_ID", "").strip()
 FEED_THREAD_ID = int(_feed_thread) if _feed_thread.isdigit() else None
 

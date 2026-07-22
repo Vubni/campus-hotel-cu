@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { uploadPhoto } from "../api.js";
+import { downscaleImage } from "../downscale.js";
 
 export default function PhotoPicker({ value, onChange, onError, name }) {
   const inputRef = useRef(null);
@@ -11,7 +12,10 @@ export default function PhotoPicker({ value, onChange, onError, name }) {
     onError?.("");
     setUploading(true);
     try {
-      const { photo_url } = await uploadPhoto(file);
+      // Ужимаем прямо в браузере: с телефона иначе едут мегабайты, которые
+      // сервер всё равно уменьшит, а на мобильном канале это минуты ожидания.
+      const small = await downscaleImage(file);
+      const { photo_url } = await uploadPhoto(small);
       onChange(photo_url);
     } catch (err) {
       onError?.(err.message);

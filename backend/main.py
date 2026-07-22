@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from html import escape
 from typing import List, Optional
@@ -13,6 +14,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, text
@@ -29,6 +31,8 @@ import schemas
 import storage
 import telegram_auth
 from database import Base, engine, get_db, wait_for_db
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="Кампус-отели Диск и Облако — поиск соседей", version="1.1.0")
 
@@ -404,6 +408,16 @@ def on_startup():
         StaticFiles(directory=config.UPLOAD_DIR),
         name="media",
     )
+    # Состояние ленты — в лог при старте: иначе «почему не приходит» проверяется
+    # только созданием анкеты, а это заметно дольше, чем заглянуть в логи.
+    if config.FEED_CHAT_ID:
+        log.info(
+            "Лента новых анкет: чат %s, тема %s",
+            config.FEED_CHAT_ID,
+            config.FEED_THREAD_ID or "не задана (сообщения уйдут в General)",
+        )
+    else:
+        log.warning("Лента новых анкет выключена: нет TELEGRAM_FEED_CHAT_ID")
 
 
 @app.get("/api/config", response_model=schemas.ConfigOut)
@@ -438,7 +452,7 @@ async def upload_photo(file: UploadFile = File(...)):
             status_code=413, detail=f"Файл больше {limit_mb} МБ — выбери поменьше"
         )
     try:
-        url = storage.save_image(raw)
+        url = await run_in_threadpool(storage.save_image, raw)
     except storage.InvalidImage as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return schemas.PhotoOut(photo_url=url)
@@ -455,7 +469,7 @@ async def _telegram_profile(user: dict) -> schemas.TelegramProfileOut:
         raw = await telegram_auth.download_avatar(remote)
         if raw:
             try:
-                photo_url = storage.save_image(raw)
+                photo_url = await run_in_threadpool(storage.save_image, raw)
             except storage.InvalidImage:
                 photo_url = None
 
@@ -505,12 +519,19 @@ async def telegram_photos(payload: schemas.TelegramPhotosIn):
     blobs, total = await telegram_auth.fetch_profile_photos(
         int(user["id"]), limit=payload.limit, offset=payload.offset
     )
-    urls: List[str] = []
-    for blob in blobs:
-        try:
-            urls.append(storage.save_image(blob))
-        except storage.InvalidImage:
-            continue
+    # Пачку аватарок обрабатываем одним заходом в поток, а не по одной: так
+    # событийный цикл переключается на другие запросы между картинками, а не
+    # стоит всё время, пока перебираем список.
+    def _save_all(items: List[bytes]) -> List[str]:
+        saved: List[str] = []
+        for item in items:
+            try:
+                saved.append(storage.save_image(item))
+            except storage.InvalidImage:
+                continue
+        return saved
+
+    urls = await run_in_threadpool(_save_all, blobs)
     return schemas.TelegramPhotosOut(photos=urls, total=total)
 
 
@@ -725,18 +746,31 @@ def get_profile(profile_id: int, db: Session = Depends(get_db)):
     return profile
 
 
+# Пол в ленте: по нему сразу видно, откроется анкета или нет — лента у парней
+# и девушек разная. Ключ «other» в анкетах не выбирается, но в колонке он
+# возможен, поэтому запасной вариант тоже есть.
+FEED_GENDER = {"male": "👨 Парень", "female": "👩 Девушка"}
+
+
 def _feed_msgs(profile: models.Profile) -> List[dict]:
     """Анонс новой анкеты в общей ленте — теме супергруппы.
 
-    Показываем только имя и кампус-отель: остальное человек посмотрит уже в
-    приложении, а лента должна оставаться коротким списком «кто появился».
+    Показываем имя, пол и кампус-отель: этого хватает, чтобы решить, открывать
+    ли, а лента остаётся коротким списком «кто появился».
     """
     if not config.FEED_CHAT_ID:
+        # Молчание тут — штатный режим (лента просто не настроена), но со
+        # стороны оно неотличимо от поломки. Говорим об этом в лог один раз
+        # на анкету, чтобы причину было видно сразу.
+        log.info(
+            "Лента новых анкет выключена: не задан TELEGRAM_FEED_CHAT_ID"
+        )
         return []
 
     text = (
         "🆕 <b>Новая анкета</b>\n\n"
         f"👤 {escape(profile.name)}\n"
+        f"{FEED_GENDER.get(profile.gender, '👤 Не указан')}\n"
         f"🏠 Кампус-отель «{campuses.label(profile.campus)}»\n\n"
         "<i>Лента разделена по полу: девушки видят только анкеты девушек, "
         "парни — только анкеты парней. Открыть чужую половину не получится.</i>"

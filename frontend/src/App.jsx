@@ -207,12 +207,17 @@ export default function App() {
 
   useEffect(() => {
     if (!gender || !campus) return;
+    // Ждём, пока выяснится, кто я. Без этого лента грузилась дважды: первый
+    // раз сразу (и «идеальные соседи» приходили пустыми — сервер не знал, с кем
+    // сравнивать), второй — когда доезжала анкета. Лишний трафик и двойная
+    // нагрузка на базу на каждом открытии.
+    if (loadingMe) return;
     const id = setTimeout(
       () => load(filters, gender, campus, myProfile?.id),
       250
     );
     return () => clearTimeout(id);
-  }, [filters, gender, campus, myProfile?.id]);
+  }, [filters, gender, campus, loadingMe, myProfile?.id]);
 
   // Анкета — источник правды про кампус-отель: сменили его в анкете (или зашли с
   // другого устройства) — лента должна переехать следом.
@@ -289,11 +294,15 @@ export default function App() {
     const node = document.getElementById(`profile-${highlightId}`);
     if (!node) return;
     scrolledTo.current = highlightId;
-    // Именно instant: плавную прокрутку браузер не проигрывает, пока вкладка
-    // не на виду, — а мини-апп по ссылке как раз стартует в фоне, и человек
-    // оказывался в начале ленты. Да и «телепорт» тут уместнее: он не сам
-    // листал, а пришёл по ссылке за конкретной анкетой.
-    node.scrollIntoView({ behavior: "instant", block: "center" });
+    // Считаем позицию сами и прокручиваем двухаргументным scrollTo. Так же,
+    // как в useModalLock, обходим { behavior: "instant" }: в Safari оно
+    // появилось только к 15.4, а собираемся мы под Safari 14.
+    // Прокрутка нужна именно мгновенная: плавную браузер не проигрывает, пока
+    // вкладка не на виду, — а мини-апп по ссылке как раз стартует в фоне, и
+    // человек оказывался в начале ленты.
+    const rect = node.getBoundingClientRect();
+    const center = rect.top + window.scrollY - (window.innerHeight - rect.height) / 2;
+    window.scrollTo(0, Math.max(0, center));
     // Подсветка — подсказка «вот она», а не постоянное состояние карточки.
     const id = setTimeout(() => setHighlightId(null), 2600);
     return () => clearTimeout(id);

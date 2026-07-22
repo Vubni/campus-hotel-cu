@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import httpx
 
@@ -31,7 +31,7 @@ async def deliver(messages: List[dict]) -> None:
 
 
 async def send_message(
-    chat_id: int,
+    chat_id: Union[int, str],  # личка — id, общая лента — id или @ник группы
     text: str,
     reply_markup: Optional[dict] = None,
     message_thread_id: Optional[int] = None,
