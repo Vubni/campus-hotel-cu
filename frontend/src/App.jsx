@@ -135,14 +135,12 @@ export default function App() {
     setCampus("");
   }
 
-  async function load(currentFilters, currentGender, currentCampus, myId) {
+  async function load(currentFilters, currentGender, currentCampus) {
     setLoading(true);
     setError("");
     try {
       // Одиночки — те, кто ещё не в комнате; комнаты и блоки грузим отдельно.
-      // Идеальных соседей сервер подбирает по моей анкете, поэтому фильтры
-      // ленты ему не передаём — пересекаем уже здесь.
-      const [people, rooms, allBlocks, ideal] = await Promise.all([
+      const [people, rooms, allBlocks] = await Promise.all([
         fetchProfiles({
           ...currentFilters,
           gender: currentGender,
@@ -153,16 +151,36 @@ export default function App() {
         campusHasBlocks(currentCampus)
           ? fetchBlocks({ gender: currentGender, campus: currentCampus })
           : Promise.resolve([]),
-        fetchIdealProfiles(myId),
       ]);
       setProfiles(people);
       setGroups(rooms);
       setBlocks(allBlocks);
-      setIdealIds(ideal.map((p) => p.id));
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  /**
+   * Идеальные соседи — отдельно от ленты, и это принципиально.
+   *
+   * Их сервер подбирает по моей анкете, перебирая все анкеты кампуса, и запрос
+   * бывает заметно медленнее остальных. Пока он стоял в одном Promise.all с
+   * лентой, лента ждала его — человек всё это время видел «Загрузка…» на весь
+   * экран, которую нечем листать. Подсказка не стоит того, чтобы задерживать
+   * главное: приходит — показываем кнопку, не приходит — просто живём без неё.
+   */
+  async function loadIdeal(myId) {
+    if (!myId) {
+      setIdealIds([]);
+      return;
+    }
+    try {
+      const ideal = await fetchIdealProfiles(myId);
+      setIdealIds(ideal.map((p) => p.id));
+    } catch {
+      setIdealIds([]);
     }
   }
 
@@ -205,19 +223,23 @@ export default function App() {
       .catch(() => setIsAdmin(false));
   }, []);
 
+  // Лента не зависит от того, выяснилось ли уже, кто я: кто угодно должен
+  // увидеть анкеты сразу. Раньше здесь стояло ожидание loadingMe — и если
+  // запрос «кто я» подвисал, лента не запрашивалась вовсе: экран навсегда
+  // оставался на «Загрузка…», высотой ровно в экран, который нечем листать.
   useEffect(() => {
     if (!gender || !campus) return;
-    // Ждём, пока выяснится, кто я. Без этого лента грузилась дважды: первый
-    // раз сразу (и «идеальные соседи» приходили пустыми — сервер не знал, с кем
-    // сравнивать), второй — когда доезжала анкета. Лишний трафик и двойная
-    // нагрузка на базу на каждом открытии.
-    if (loadingMe) return;
-    const id = setTimeout(
-      () => load(filters, gender, campus, myProfile?.id),
-      250
-    );
+    const id = setTimeout(() => load(filters, gender, campus), 250);
     return () => clearTimeout(id);
-  }, [filters, gender, campus, loadingMe, myProfile?.id]);
+  }, [filters, gender, campus]);
+
+  // А вот подсказка про идеальных соседей без анкеты бессмысленна — её и
+  // грузим тогда, когда стало известно, кто я. Отдельным запросом, поэтому
+  // ленту это уже не задерживает и дважды её не дёргает.
+  useEffect(() => {
+    if (loadingMe) return;
+    loadIdeal(myProfile?.id);
+  }, [loadingMe, myProfile?.id]);
 
   // Анкета — источник правды про кампус-отель: сменили его в анкете (или зашли с
   // другого устройства) — лента должна переехать следом.
@@ -334,10 +356,12 @@ export default function App() {
 
   async function refresh() {
     const [, me] = await Promise.all([
-      load(filters, gender, campus, myProfile?.id),
+      load(filters, gender, campus),
       reloadMe(),
     ]);
     await loadRequests(me || myProfile);
+    // Анкета могла измениться — с ней меняется и список идеальных соседей.
+    await loadIdeal((me || myProfile)?.id);
   }
 
   async function withBusy(action) {
