@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   cancelBlockRequest,
   cancelRequest,
@@ -11,8 +11,10 @@ import {
   fetchConfig,
   fetchGroupRequests,
   fetchGroups,
+  fetchIdealProfiles,
   fetchMyInvites,
   fetchMyRequests,
+  fetchProfile,
   respondInvite,
   fetchProfiles,
   leaveBlock,
@@ -37,7 +39,7 @@ import {
   campusHasBlocks,
   campusRoomsText,
 } from "./labels.js";
-import { initWebApp } from "./telegram.js";
+import { getStartParam, initWebApp } from "./telegram.js";
 import { useMyProfile } from "./useMyProfile.js";
 
 const GENDER_KEY = "obshaga_gender";
@@ -61,6 +63,14 @@ const EMPTY_FILTERS = {
 };
 
 const GENDER_WORD = { male: "Парни", female: "Девушки" };
+// Родительный падеж — для фразы «лента девушек».
+const GENDER_OF = { male: "парней", female: "девушек" };
+
+/** Номер анкеты из ссылки вида ?startapp=p123 (или ?profile=123 вне Telegram). */
+function startProfileId() {
+  const match = /^p(\d+)$/.exec(getStartParam());
+  return match ? Number(match[1]) : null;
+}
 
 export default function App() {
   const [gender, setGender] = useState(
@@ -94,6 +104,19 @@ export default function App() {
   // Админка своя только у владельцев — решает сервер по подписи Telegram.
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // «Идеальные соседи»: у кого совпали все мои параметры. Подбирает сервер.
+  const [idealIds, setIdealIds] = useState([]);
+  const [idealOn, setIdealOn] = useState(false);
+
+  // Анкета из ссылки в общей ленте: на неё надо прокрутить и подсветить её.
+  // Читаем один раз при запуске — дальше это уже история, а не команда.
+  const [targetId] = useState(startProfileId);
+  const [targetError, setTargetError] = useState("");
+  const [highlightId, setHighlightId] = useState(null);
+  // Прокручиваем ровно один раз: иначе любое обновление ленты дёргало бы
+  // человека обратно к чужой анкете.
+  const scrolledTo = useRef(null);
+
   const { myProfile, loadingMe, remember, forget, reloadMe } = useMyProfile();
 
   function chooseGender(value) {
@@ -112,12 +135,14 @@ export default function App() {
     setCampus("");
   }
 
-  async function load(currentFilters, currentGender, currentCampus) {
+  async function load(currentFilters, currentGender, currentCampus, myId) {
     setLoading(true);
     setError("");
     try {
       // Одиночки — те, кто ещё не в комнате; комнаты и блоки грузим отдельно.
-      const [people, rooms, allBlocks] = await Promise.all([
+      // Идеальных соседей сервер подбирает по моей анкете, поэтому фильтры
+      // ленты ему не передаём — пересекаем уже здесь.
+      const [people, rooms, allBlocks, ideal] = await Promise.all([
         fetchProfiles({
           ...currentFilters,
           gender: currentGender,
@@ -128,10 +153,12 @@ export default function App() {
         campusHasBlocks(currentCampus)
           ? fetchBlocks({ gender: currentGender, campus: currentCampus })
           : Promise.resolve([]),
+        fetchIdealProfiles(myId),
       ]);
       setProfiles(people);
       setGroups(rooms);
       setBlocks(allBlocks);
+      setIdealIds(ideal.map((p) => p.id));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -180,9 +207,12 @@ export default function App() {
 
   useEffect(() => {
     if (!gender || !campus) return;
-    const id = setTimeout(() => load(filters, gender, campus), 250);
+    const id = setTimeout(
+      () => load(filters, gender, campus, myProfile?.id),
+      250
+    );
     return () => clearTimeout(id);
-  }, [filters, gender, campus]);
+  }, [filters, gender, campus, myProfile?.id]);
 
   // Анкета — источник правды про кампус-отель: сменили его в анкете (или зашли с
   // другого устройства) — лента должна переехать следом.
@@ -201,6 +231,73 @@ export default function App() {
       setFilters((prev) => ({ ...prev, room_capacity: "" }));
     }
   }, [campus, filters.room_capacity]);
+
+  // ===== Переход из общей ленты на конкретную анкету =====
+
+  // Пришли по ссылке — сначала выясняем, чья это анкета: от неё зависит и
+  // кампус-отель, и лента, в которой её вообще видно.
+  useEffect(() => {
+    if (!targetId || loadingMe) return;
+    let cancelled = false;
+
+    fetchProfile(targetId)
+      .then((target) => {
+        if (cancelled) return;
+        // Свой пол берём из анкеты, а без анкеты — из выбора на входе.
+        const myGender = myProfile?.gender || gender;
+        if (myGender && target.gender !== myGender) {
+          setTargetError(
+            `Эта анкета из ленты ${GENDER_OF[target.gender] || "другого пола"}` +
+              " — открыть её нельзя. Соседей подбирают только внутри своего пола."
+          );
+          return;
+        }
+        setTargetError("");
+        // Ленту переключаем на анкету: иначе ссылка приводит в пустоту, если
+        // человек до этого смотрел другой отель.
+        if (target.campus !== campus) chooseCampus(target.campus);
+        if (!gender) chooseGender(target.gender);
+
+        // В ленте «ищут соседей» только те, кто ещё не в комнате. Если человек
+        // уже собрался — искать его карточку там бесполезно, честнее сказать.
+        if (target.group_id) {
+          setTargetError(
+            `${target.name} уже собрал(а) комнату — загляни во вкладку «Комнаты».`
+          );
+          setTab("groups");
+          return;
+        }
+        setTab("singles");
+        setHighlightId(target.id);
+      })
+      .catch(() => {
+        if (!cancelled) setTargetError("Анкету не нашли — её могли удалить.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // Достаточно одного захода: как только стало известно, кто я, решение
+    // принято и повторять его не нужно.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetId, loadingMe]);
+
+  // Анкета доехала до ленты — прокручиваем к ней и снимаем подсветку.
+  useEffect(() => {
+    if (!highlightId || loading) return;
+    if (scrolledTo.current === highlightId) return;
+    const node = document.getElementById(`profile-${highlightId}`);
+    if (!node) return;
+    scrolledTo.current = highlightId;
+    // Именно instant: плавную прокрутку браузер не проигрывает, пока вкладка
+    // не на виду, — а мини-апп по ссылке как раз стартует в фоне, и человек
+    // оказывался в начале ленты. Да и «телепорт» тут уместнее: он не сам
+    // листал, а пришёл по ссылке за конкретной анкетой.
+    node.scrollIntoView({ behavior: "instant", block: "center" });
+    // Подсветка — подсказка «вот она», а не постоянное состояние карточки.
+    const id = setTimeout(() => setHighlightId(null), 2600);
+    return () => clearTimeout(id);
+  }, [highlightId, loading, profiles]);
 
   function handleCreated(profile) {
     setModal(null);
@@ -228,7 +325,7 @@ export default function App() {
 
   async function refresh() {
     const [, me] = await Promise.all([
-      load(filters, gender, campus),
+      load(filters, gender, campus, myProfile?.id),
       reloadMe(),
     ]);
     await loadRequests(me || myProfile);
@@ -317,7 +414,13 @@ export default function App() {
     ? blockRequests.filter((r) => r.to_group_id === myGroup.id).length
     : 0;
   // Пусто из-за фильтров или тут вообще никого нет — это разные сообщения.
-  const filtersActive = Object.values(filters).some((v) => v !== "");
+  const filtersActive = Object.values(filters).some((v) => v !== "") || idealOn;
+  // «Идеальные» пересекаем с лентой, а не заменяем её: обычные фильтры при
+  // этом продолжают работать.
+  const idealSet = new Set(idealIds);
+  const shownProfiles = idealOn
+    ? profiles.filter((p) => idealSet.has(p.id))
+    : profiles;
 
   return (
     <div className="app">
@@ -456,6 +559,21 @@ export default function App() {
           )}
         </div>
 
+        {/* Пришли по ссылке из общей ленты, но показать анкету не вышло —
+            объясняем почему, иначе ссылка выглядит просто сломанной. */}
+        {targetError && (
+          <div className="notice">
+            <span className="notice__text">{targetError}</span>
+            <button
+              className="notice__close"
+              onClick={() => setTargetError("")}
+              aria-label="Скрыть"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {incomingInvites.length > 0 && (
           <div className="invites">
             {incomingInvites.map((inv) => (
@@ -490,7 +608,13 @@ export default function App() {
             filters={filters}
             campus={campus}
             onChange={setFilters}
-            onReset={() => setFilters(EMPTY_FILTERS)}
+            onReset={() => {
+              setFilters(EMPTY_FILTERS);
+              setIdealOn(false);
+            }}
+            idealCount={idealIds.length}
+            idealOn={idealOn}
+            onToggleIdeal={() => setIdealOn((v) => !v)}
           />
         )}
 
@@ -500,14 +624,15 @@ export default function App() {
         {!loading && !error && tab === "singles" && (
           <>
             <p className="count">
-              Ищут соседей: <strong>{profiles.length}</strong>
-              {openGroups.length > 0 && (
+              {idealOn ? "Идеально подходят: " : "Ищут соседей: "}
+              <strong>{shownProfiles.length}</strong>
+              {!idealOn && openGroups.length > 0 && (
                 <>
                   {" "}· комнат с местами: <strong>{openGroups.length}</strong>
                 </>
               )}
             </p>
-            {profiles.length === 0 ? (
+            {shownProfiles.length === 0 ? (
               <p className="state">
                 {filtersActive
                   ? "Под фильтры никто не подошёл. Попробуй смягчить условия."
@@ -515,12 +640,16 @@ export default function App() {
               </p>
             ) : (
               <div className="grid">
-                {profiles.map((p) => (
+                {shownProfiles.map((p) => (
                   <RoommateCard
                     key={p.id}
                     profile={p}
                     myProfile={myProfile}
                     capacities={capacities}
+                    // Пришли по ссылке из общей ленты — подсвечиваем ту анкету,
+                    // за которой человек сюда и шёл.
+                    highlight={p.id === highlightId}
+                    ideal={idealSet.has(p.id)}
                     invite={myInvites.find(
                       (i) =>
                         i.to_profile_id === p.id &&

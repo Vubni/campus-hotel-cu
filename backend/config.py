@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 
 # Токен и имя бота из @BotFather. Без них вход через Telegram отключается,
 # а загрузка фото файлом продолжает работать.
@@ -19,6 +20,53 @@ BOT_SECRET = os.getenv("BOT_SECRET", "").strip()
 
 # Адрес сайта — подставляем в ссылки внутри сообщений бота.
 SITE_URL = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
+
+# Короткое имя мини-аппа из @BotFather (t.me/<бот>/<это имя>). Пусто — считаем,
+# что мини-апп подключён как главный, и ссылка идёт просто на бота.
+TELEGRAM_MINIAPP_SHORT_NAME = os.getenv("TELEGRAM_MINIAPP_SHORT_NAME", "").strip()
+
+
+def _supergroup_chat_id(raw: str) -> Optional[int]:
+    """Chat id супергруппы из переменной окружения.
+
+    Telegram показывает id супергруппы и без префикса «-100» (например, в
+    ссылках и в сторонних клиентах), а Bot API принимает только полный вид.
+    Чтобы не ловить «chat not found» из-за формата, дописываем префикс сами.
+    """
+    raw = raw.strip()
+    if not raw.lstrip("-").isdigit():
+        return None
+    value = int(raw)
+    if value > 0:
+        return int(f"-100{value}")
+    return value
+
+
+# Общая лента: чат, куда бот пишет о каждой новой анкете. Это супергруппа с
+# темами, поэтому кроме чата нужен и номер темы (message_thread_id) — без него
+# сообщение упадёт в «General». Пусто — в ленту просто ничего не пишем.
+FEED_CHAT_ID = _supergroup_chat_id(os.getenv("TELEGRAM_FEED_CHAT_ID", ""))
+_feed_thread = os.getenv("TELEGRAM_FEED_THREAD_ID", "").strip()
+FEED_THREAD_ID = int(_feed_thread) if _feed_thread.isdigit() else None
+
+
+def profile_link(profile_id: int) -> str:
+    """Ссылка, открывающая мини-апп сразу на нужной анкете.
+
+    Внутри группы кнопка может быть только обычной url-кнопкой (web_app
+    Telegram разрешает лишь в личке), поэтому ведём через t.me — он откроет
+    мини-апп, а не браузер. start_param разбирает фронтенд.
+    """
+    param = f"p{profile_id}"
+    if TELEGRAM_BOT_USERNAME:
+        if TELEGRAM_MINIAPP_SHORT_NAME:
+            return (
+                f"https://t.me/{TELEGRAM_BOT_USERNAME}/"
+                f"{TELEGRAM_MINIAPP_SHORT_NAME}?startapp={param}"
+            )
+        return f"https://t.me/{TELEGRAM_BOT_USERNAME}?startapp={param}"
+    # Бота нет — остаётся обычный сайт: тот же параметр читается из адреса.
+    return f"{SITE_URL}/?profile={profile_id}"
 
 
 # Владельцы сервиса. Держим прямо здесь, чтобы админка работала сразу после

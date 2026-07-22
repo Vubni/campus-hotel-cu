@@ -32,6 +32,21 @@ export async function fetchProfiles(filters = {}) {
   return res.json();
 }
 
+/**
+ * «Идеальные соседи» — те, у кого совпали все мои бытовые параметры.
+ * Подбирает сервер по моей анкете. Пустой список = кнопку показывать не надо.
+ */
+export async function fetchIdealProfiles(profileId) {
+  // profile_id сервер слушает только на локальной разработке, где нет подписи
+  // Telegram. На проде «кто я» он берёт из неё и параметр игнорирует.
+  const qs = profileId ? `?profile_id=${profileId}` : "";
+  const res = await fetch(`${BASE}/profiles/ideal${qs}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
 async function jsonOrThrow(res, fallback) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

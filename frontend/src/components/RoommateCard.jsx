@@ -12,6 +12,10 @@ export default function RoommateCard({
   onInvite,
   // Какие комнаты бывают в этом кампус-отеле — в «Облаке» на четверых не селят.
   capacities = [2, 3, 4],
+  // Анкета, за которой пришли по ссылке из общей ленты: её подсвечиваем.
+  highlight = false,
+  // Совпали все мои параметры — помечаем, чтобы это было видно и в общей ленте.
+  ideal = false,
   busy,
 }) {
   const {
@@ -45,7 +49,10 @@ export default function RoommateCard({
   const inviteSizes = wanted.length > 0 ? wanted : capacities;
 
   return (
-    <article className="card">
+    <article
+      id={`profile-${profile.id}`}
+      className={`card${highlight ? " card--highlight" : ""}`}
+    >
       {/* Шапка: квадратное фото и то, кто это. Дальше — всё на всю ширину,
           иначе на телефоне детали ютились бы в узкой колонке справа. */}
       <div className="card__top">
@@ -70,6 +77,12 @@ export default function RoommateCard({
             )}
             <span className="card__gender">{GENDER[gender]}</span>
           </h3>
+
+          {ideal && (
+            <span className="card__ideal" title="Совпали все твои параметры">
+              ✨ Идеальный сосед
+            </span>
+          )}
 
           {/* Ничего не выбрано — строку не рисуем, иначе остаётся пустой отступ. */}
           {(TRACK[track] || course) && (

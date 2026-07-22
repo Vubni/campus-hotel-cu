@@ -38,6 +38,10 @@ services:
       SITE_URL: https://${DOMAIN:?задай DOMAIN в .env}
       # Прокси до Telegram (уведомления, аватарки). Пусто — напрямую.
       TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
+      # Куда анонсировать новые анкеты. Пусто — лента выключена.
+      TELEGRAM_MINIAPP_SHORT_NAME: ${TELEGRAM_MINIAPP_SHORT_NAME:-}
+      TELEGRAM_FEED_CHAT_ID: ${TELEGRAM_FEED_CHAT_ID:-}
+      TELEGRAM_FEED_THREAD_ID: ${TELEGRAM_FEED_THREAD_ID:-}
     volumes:
       - uploads:/app/uploads
     depends_on:

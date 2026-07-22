@@ -50,6 +50,34 @@ export function closeWebApp() {
   }
 }
 
+/**
+ * Параметр из ссылки t.me/<бот>?startapp=<это>. Так из общей ленты попадают
+ * сразу на нужную анкету. Вне Telegram читаем его же из адреса: ?profile=123.
+ */
+export function getStartParam() {
+  const fromTelegram = getWebApp()?.initDataUnsafe?.start_param;
+  if (fromTelegram) return String(fromTelegram);
+  const fromUrl = new URLSearchParams(window.location.search).get("profile");
+  return fromUrl ? `p${fromUrl}` : "";
+}
+
+/**
+ * Вертикальный свайп по мини-аппу: им Telegram сворачивает окно. Пока открыта
+ * модалка, это мешает — форму «стаскивает» вниз вместе со всем приложением,
+ * и из-под неё видно ленту. Метод появился в Bot API 7.7, на старых клиентах
+ * его просто нет.
+ */
+export function setVerticalSwipes(enabled) {
+  const wa = getWebApp();
+  if (!wa) return;
+  try {
+    if (enabled) wa.enableVerticalSwipes?.();
+    else wa.disableVerticalSwipes?.();
+  } catch {
+    // Старый клиент — молча живём без этого.
+  }
+}
+
 /** Тема Telegram: подстраиваем приложение под тему клиента. */
 export function getTelegramColorScheme() {
   return getWebApp()?.colorScheme || null;

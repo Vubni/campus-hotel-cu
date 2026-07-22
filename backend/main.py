@@ -1,4 +1,5 @@
 from datetime import datetime
+from html import escape
 from typing import List, Optional
 
 from fastapi import (
@@ -596,6 +597,94 @@ def list_profiles(
     return query.order_by(models.Profile.created_at.desc()).all()
 
 
+# Бытовые привычки, по которым считаем «идеального соседа». Курс и направление
+# сюда не входят: они про учёбу, а не про то, каково будет жить вместе.
+IDEAL_FIELDS = (
+    "sleep_schedule",
+    "smoking",
+    "tidiness",
+    "wakeup",
+    "guests",
+    "shower",
+    "temperature",
+    "noise",
+    "alcohol",
+)
+
+# «Без разницы» подходит к любому ответу — иначе человек, которому всё равно,
+# не совпал бы ни с кем.
+IDEAL_WILDCARD = "any"
+
+
+def _ideal_match(me: models.Profile, other: models.Profile) -> bool:
+    """Совпали ли все бытовые параметры, которые я у себя указал.
+
+    Незаполненные у меня поля не проверяем: я про них не высказался, значит и
+    требовать от соседа нечего.
+    """
+    for field in IDEAL_FIELDS:
+        mine = getattr(me, field)
+        if not mine or mine == IDEAL_WILDCARD:
+            continue
+        theirs = getattr(other, field)
+        if theirs != mine and theirs != IDEAL_WILDCARD:
+            return False
+
+    # Списки: достаточно пересечения. Пустой список — «не важно», подходит всё.
+    for field in ("cooking", "room_capacities"):
+        mine = {v for v in (getattr(me, field) or "").split(",") if v}
+        theirs = {v for v in (getattr(other, field) or "").split(",") if v}
+        if mine and theirs and not (mine & theirs):
+            return False
+    return True
+
+
+@app.get(
+    "/api/profiles/ideal",
+    response_model=List[schemas.ProfileOut],
+    dependencies=[Depends(telegram_user)],
+)
+def list_ideal_profiles(
+    db: Session = Depends(get_db),
+    me: Optional[models.Profile] = Depends(current_profile),
+    profile_id: Optional[int] = Query(
+        None, description="Только для локальной разработки, без токена бота"
+    ),
+):
+    """Те, у кого совпали все мои бытовые параметры.
+
+    Без анкеты сравнивать не с чем, как и в случае, когда я ничего о себе не
+    указал — тогда «идеальным» оказался бы каждый, и подсказка теряет смысл.
+    Пустой ответ фронт понимает как «кнопку показывать не надо».
+    """
+    # На проде «кто я» решает подпись Telegram. Без токена бота подписи нет
+    # вовсе (локальная разработка) — только там верим параметру из адреса,
+    # иначе им можно было бы спрашивать за других.
+    if me is None and profile_id and not config.TELEGRAM_BOT_TOKEN:
+        me = db.query(models.Profile).filter(models.Profile.id == profile_id).first()
+    if me is None:
+        return []
+    if not any(
+        getattr(me, f) and getattr(me, f) != IDEAL_WILDCARD for f in IDEAL_FIELDS
+    ):
+        return []
+
+    # Ищем только среди тех, к кому вообще можно проситься: свой отель, свой
+    # пол, ещё не в комнате.
+    candidates = (
+        db.query(models.Profile)
+        .filter(
+            models.Profile.id != me.id,
+            models.Profile.gender == me.gender,
+            models.Profile.campus == me.campus,
+            models.Profile.group_id.is_(None),
+        )
+        .order_by(models.Profile.created_at.desc())
+        .all()
+    )
+    return [p for p in candidates if _ideal_match(me, p)]
+
+
 @app.post("/api/profiles/me", response_model=schemas.ProfileOut)
 def resolve_my_profile(
     payload: schemas.TelegramWebAppAuth, db: Session = Depends(get_db)
@@ -636,8 +725,40 @@ def get_profile(profile_id: int, db: Session = Depends(get_db)):
     return profile
 
 
+def _feed_msgs(profile: models.Profile) -> List[dict]:
+    """Анонс новой анкеты в общей ленте — теме супергруппы.
+
+    Показываем только имя и кампус-отель: остальное человек посмотрит уже в
+    приложении, а лента должна оставаться коротким списком «кто появился».
+    """
+    if not config.FEED_CHAT_ID:
+        return []
+
+    text = (
+        "🆕 <b>Новая анкета</b>\n\n"
+        f"👤 {escape(profile.name)}\n"
+        f"🏠 Кампус-отель «{campuses.label(profile.campus)}»\n\n"
+        "<i>Лента разделена по полу: девушки видят только анкеты девушек, "
+        "парни — только анкеты парней. Открыть чужую половину не получится.</i>"
+    )
+    return [
+        {
+            "chat_id": config.FEED_CHAT_ID,
+            "message_thread_id": config.FEED_THREAD_ID,
+            "text": text,
+            "reply_markup": notifier.open_profile_keyboard(
+                config.profile_link(profile.id)
+            ),
+        }
+    ]
+
+
 @app.post("/api/profiles", response_model=schemas.ProfileOut, status_code=201)
-def create_profile(payload: schemas.ProfileCreate, db: Session = Depends(get_db)):
+def create_profile(
+    payload: schemas.ProfileCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     data = payload.model_dump()
     widget_auth = data.pop("telegram_auth", None)
     init_data = data.pop("telegram_init_data", None)
@@ -669,6 +790,9 @@ def create_profile(payload: schemas.ProfileCreate, db: Session = Depends(get_db)
     db.add(profile)
     db.commit()
     db.refresh(profile)
+
+    # Лента ждать не должна: анкета уже сохранена, анонс уходит фоном.
+    background_tasks.add_task(notifier.deliver, _feed_msgs(profile))
     return profile
 
 
@@ -776,7 +900,22 @@ TRACK_LABEL = {
 }
 
 
+def _h(value: Optional[str]) -> str:
+    """Готовит имя или ник к вставке в сообщение бота.
+
+    Сообщения размечены HTML, а имя человек вводит сам. Без экранирования
+    «Аня <3» либо теряет кусок текста, либо Telegram отказывается принимать
+    сообщение целиком — и уведомление не доходит вообще ни до кого.
+
+    Экранировать нужно ровно один раз, поэтому применяем в месте сборки
+    текста: то, что уходит боту в JSON (см. /api/bot/*), остаётся сырым — там
+    свой HTML собирает уже сам бот.
+    """
+    return escape(value or "")
+
+
 def _who(profile: models.Profile) -> str:
+    """Имя с направлением. Сырое: годится и для сообщения (через _h), и для JSON."""
     label = TRACK_LABEL.get(profile.track)
     return f"{profile.name} · {label}" if label else profile.name
 
@@ -788,7 +927,7 @@ def _msg(chat_id: Optional[int], text: str, reply_markup: Optional[dict] = None)
 
 def _request_msgs(req: models.JoinRequest) -> List[dict]:
     """Заявка ушла — зовём подтвердить всех, кто в комнате."""
-    who = _who(req.profile)
+    who = _h(_who(req.profile))
     needed = join_flow.votes_needed(req)
     msgs = []
     for member in req.group.members:
@@ -797,7 +936,7 @@ def _request_msgs(req: models.JoinRequest) -> List[dict]:
                 _msg(
                     member.telegram_chat_id,
                     f"🔔 <b>{who}</b> просится к вам в комнату на {req.group.capacity}.\n"
-                    f"@{req.profile.telegram}\n\n"
+                    f"@{_h(req.profile.telegram)}\n\n"
                     f"Нужно согласие всех участников ({needed}).",
                     notifier.vote_keyboard(req.id),
                 )
@@ -811,7 +950,9 @@ def _decision_msgs(req: models.JoinRequest, status: str) -> List[dict]:
     if not profile.telegram_chat_id:
         return []
     if status == join_flow.APPROVED:
-        mates = ", ".join(m.name for m in req.group.members if m.id != profile.id)
+        mates = ", ".join(
+            _h(m.name) for m in req.group.members if m.id != profile.id
+        )
         return [
             _msg(
                 profile.telegram_chat_id,
@@ -890,7 +1031,7 @@ def _remove_from_group(
     if group is None:
         return []
 
-    left_name = profile.name
+    left_name = _h(profile.name)
     profile.group_id = None
     db.flush()
     db.refresh(group)
@@ -987,7 +1128,7 @@ def _apply_vote(
                 msgs.append(
                     _msg(
                         member.telegram_chat_id,
-                        f"✅ <b>{req.profile.name}</b> теперь в вашей комнате.",
+                        f"✅ <b>{_h(req.profile.name)}</b> теперь в вашей комнате.",
                     )
                 )
         for other in also_rejected:
@@ -1289,7 +1430,7 @@ def change_group_capacity(
             msgs.append(
                 _msg(
                     member.telegram_chat_id,
-                    f"🔁 <b>{profile.name}</b> изменил(а) размер вашей комнаты: "
+                    f"🔁 <b>{_h(profile.name)}</b> изменил(а) размер вашей комнаты: "
                     f"была на {was}, стала на {payload.capacity}.\n"
                     f"{config.SITE_URL}",
                 )
@@ -1351,9 +1492,9 @@ def _invite_msgs(invite: models.GroupInvite) -> List[dict]:
     return [
         _msg(
             target.telegram_chat_id,
-            f"🤝 <b>{_who(invite.from_profile)}</b> зовёт тебя жить вместе — "
+            f"🤝 <b>{_h(_who(invite.from_profile))}</b> зовёт тебя жить вместе — "
             f"комната на {invite.capacity}.\n"
-            f"@{invite.from_profile.telegram}\n\n"
+            f"@{_h(invite.from_profile.telegram)}\n\n"
             "Комната появится, только если ты согласишься.",
             notifier.invite_keyboard(invite.id),
         )
@@ -1395,7 +1536,7 @@ def _accept_invite(
         msgs.append(
             _msg(
                 author.telegram_chat_id,
-                f"🎉 <b>{target.name}</b> согласи(лся/лась) жить с тобой!\n"
+                f"🎉 <b>{_h(target.name)}</b> согласи(лся/лась) жить с тобой!\n"
                 f"Комната на {invite.capacity} создана: {config.SITE_URL}",
             )
         )
@@ -1413,7 +1554,7 @@ def _decline_invite(db: Session, invite: models.GroupInvite) -> List[dict]:
         msgs.append(
             _msg(
                 author.telegram_chat_id,
-                f"😔 <b>{invite.to_profile.name}</b> отказал(а)ся жить вместе. "
+                f"😔 <b>{_h(invite.to_profile.name)}</b> отказал(а)ся жить вместе. "
                 f"Есть и другие варианты: {config.SITE_URL}",
             )
         )
@@ -1583,8 +1724,11 @@ def _block_request_out(req: models.BlockRequest) -> schemas.BlockRequestOut:
 
 
 def _room_name(group: models.Group) -> str:
-    """«Комната на 4 (Аня, Лена)» — чтобы понять, кого зовут, прямо в Telegram."""
-    who = ", ".join(m.name for m in group.members)
+    """«Комната на 4 (Аня, Лена)» — чтобы понять, кого зовут, прямо в Telegram.
+
+    Уходит только в текст сообщений, поэтому имена экранируем сразу здесь.
+    """
+    who = ", ".join(_h(m.name) for m in group.members)
     return f"комната на {group.capacity}" + (f" ({who})" if who else "")
 
 

@@ -99,7 +99,18 @@ const FILTER_SELECTS = [
   ],
 ];
 
-export default function Filters({ filters, campus, onChange, onReset }) {
+export default function Filters({
+  filters,
+  campus,
+  onChange,
+  onReset,
+  // Сколько нашлось людей, у которых совпали все мои параметры, и включён ли
+  // показ только их. Ноль — кнопки нет: обещать «идеального соседа» и
+  // показывать пустоту хуже, чем промолчать.
+  idealCount = 0,
+  idealOn = false,
+  onToggleIdeal,
+}) {
   // Фильтров стало много — прячем их за кнопку, чтобы не занимали пол-экрана.
   const [open, setOpen] = useState(false);
   const set = (key) => (e) => onChange({ ...filters, [key]: e.target.value });
@@ -147,6 +158,19 @@ export default function Filters({ filters, campus, onChange, onReset }) {
           <span aria-hidden="true">{open ? "▲" : "▼"}</span>
         </button>
       </div>
+
+      {idealCount > 0 && (
+        <button
+          type="button"
+          className={`filters__ideal${idealOn ? " filters__ideal--on" : ""}`}
+          onClick={onToggleIdeal}
+          aria-pressed={idealOn}
+        >
+          <span aria-hidden="true">✨</span>
+          {idealOn ? "Показать всех" : "Показать идеального соседа"}
+          <span className="filters__ideal-count">{idealCount}</span>
+        </button>
+      )}
 
       {open && (
         <div className="filters__panel">

@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import html
 import logging
 import os
 
@@ -33,6 +34,16 @@ SITE_URL = os.getenv("SITE_URL", "http://localhost:5173").rstrip("/")
 TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL", "").strip()
 
 dp = Dispatcher()
+
+
+def h(value) -> str:
+    """Экранирует то, что человек вводил сам, — имена и ники.
+
+    Сообщения размечены HTML: имя вроде «Аня <3» без этого либо теряет кусок
+    текста, либо Telegram вовсе отказывается принять сообщение. Бэкенд отдаёт
+    такие поля сырыми — разметку тут собираем мы, нам и экранировать.
+    """
+    return html.escape(str(value or ""))
 
 
 def api_client() -> httpx.AsyncClient:
@@ -78,7 +89,7 @@ async def cmd_start(message: Message):
     campus = profile.get("campus")
     where = f" Ты в кампус-отеле <b>{campus}</b>." if campus else ""
     await message.answer(
-        f"✅ Привет, {profile['name']}! Уведомления включены.{where}\n\n"
+        f"✅ Привет, {h(profile['name'])}! Уведомления включены.{where}\n\n"
         "Буду писать, когда кто-то попросится к тебе в комнату, когда твою "
         "заявку рассмотрят, когда сосед выйдет из комнаты и когда в ней "
         "изменят число мест.\n\n"
@@ -105,8 +116,8 @@ async def cmd_pending(message: Message):
 
     for item in items:
         await message.answer(
-            f"🔔 <b>{item['who']}</b> просится в комнату на {item['capacity']}.\n"
-            f"@{item['telegram']}",
+            f"🔔 <b>{h(item['who'])}</b> просится в комнату на {item['capacity']}.\n"
+            f"@{h(item['telegram'])}",
             reply_markup={
                 "inline_keyboard": [
                     [
@@ -232,9 +243,9 @@ async def on_vote(call: CallbackQuery):
 
     data = resp.json()
     if data["status"] == "approved":
-        tail = f"✅ {data['who']} принят(а) — все согласились."
+        tail = f"✅ {h(data['who'])} принят(а) — все согласились."
     elif data["status"] == "rejected":
-        tail = f"✖️ Заявка {data['who']} отклонена."
+        tail = f"✖️ Заявка {h(data['who'])} отклонена."
     else:
         tail = (
             f"Твой голос учтён: {data['votes_done']} из {data['votes_needed']}. "

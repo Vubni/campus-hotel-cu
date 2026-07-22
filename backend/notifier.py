@@ -23,12 +23,18 @@ async def deliver(messages: List[dict]) -> None:
     """
     for msg in messages:
         await send_message(
-            msg["chat_id"], msg["text"], msg.get("reply_markup")
+            msg["chat_id"],
+            msg["text"],
+            msg.get("reply_markup"),
+            msg.get("message_thread_id"),
         )
 
 
 async def send_message(
-    chat_id: int, text: str, reply_markup: Optional[dict] = None
+    chat_id: int,
+    text: str,
+    reply_markup: Optional[dict] = None,
+    message_thread_id: Optional[int] = None,
 ) -> bool:
     """Шлёт сообщение. Никогда не роняет вызывающий код.
 
@@ -46,6 +52,10 @@ async def send_message(
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    # Тема супергруппы. Без него сообщение уходит в «General», а не туда,
+    # где его ждут.
+    if message_thread_id:
+        payload["message_thread_id"] = message_thread_id
 
     try:
         async with httpx.AsyncClient(timeout=10, proxy=TELEGRAM_PROXY_URL) as client:
@@ -96,6 +106,15 @@ async def send_document(
         # обычное «нажми /start» тут ни при чём. Подробности пишем в лог.
         log.warning("Telegram не принял файл: %s", resp.text[:200])
         raise DocumentError("Telegram не принял файл, попробуй ещё раз")
+
+
+def open_profile_keyboard(url: str) -> dict:
+    """Кнопка «открыть анкету» под сообщением в общей ленте.
+
+    Именно url, а не web_app: web_app-кнопки Telegram разрешает только в
+    личке, в группе такая клавиатура не отправится вовсе.
+    """
+    return {"inline_keyboard": [[{"text": "👀 Открыть анкету", "url": url}]]}
 
 
 def invite_keyboard(invite_id: int) -> dict:

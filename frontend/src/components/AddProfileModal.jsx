@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   authTelegram,
   authTelegramWebApp,
@@ -9,6 +9,7 @@ import {
   updateProfile,
 } from "../api.js";
 import { getInitData, isInsideTelegram } from "../telegram.js";
+import { useModalLock } from "../useModalLock.js";
 import {
   CAMPUS,
   COURSES,
@@ -86,6 +87,8 @@ export default function AddProfileModal({
   onDeleted,
 }) {
   const isEdit = Boolean(profile);
+  // Форма длинная — фон под ней не должен ни скроллиться, ни уезжать свайпом.
+  useModalLock();
   const [config, setConfig] = useState(null);
   // Подтверждённые данные Telegram: их же отправим на сервер для перепроверки.
   const [tgAuth, setTgAuth] = useState(null);
@@ -107,6 +110,8 @@ export default function AddProfileModal({
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Начался ли жест именно на подложке — см. обработчики ниже.
+  const overlayDown = useRef(false);
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
@@ -268,8 +273,19 @@ export default function AddProfileModal({
   }
 
   return (
-    <div className="modal__overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="modal__overlay"
+      onPointerDown={(e) => {
+        overlayDown.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        // Закрываем только по настоящему клику мимо окна. Раньше хватало
+        // «отпустить палец» за краем формы — и заполненная анкета пропадала,
+        // хотя человек всего лишь листал её движением из середины.
+        if (e.target === e.currentTarget && overlayDown.current) onClose();
+      }}
+    >
+      <div className="modal">
         <div className="modal__head">
           <h2>{isEdit ? "Моя анкета" : "Разместить анкету"}</h2>
           <button className="modal__close" onClick={onClose}>

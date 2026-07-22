@@ -57,6 +57,9 @@ html,
 body {
   max-width: 100%;
   overflow-x: hidden;
+  /* Гасим «резинку» на краях: внутри Telegram она читается как то, что
+     страницу можно оттащить, и мини-апп начинает съезжать вслед за пальцем. */
+  overscroll-behavior-y: none;
 }
 #root {
   width: 100%;
@@ -570,6 +573,71 @@ body {
   color: var(--accent);
 }
 
+/* «Показать идеального соседа» — появляется, только если такие люди есть.
+   Отдельной строкой под поиском: это не ещё один фильтр в ряду, а готовый
+   ответ, поэтому и выглядит заметнее остальных. */
+.filters__ideal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 12px 18px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  border-radius: var(--pill);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.filters__ideal--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.filters__ideal-count {
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: var(--pill);
+  padding: 2px 8px;
+  background: var(--accent);
+  color: #fff;
+}
+.filters__ideal--on .filters__ideal-count {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Плашка «почему не открылось» после перехода по ссылке из общей ленты. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.notice__text {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.notice__close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
 .count {
   font-size: 14px;
   color: var(--ink-soft);
@@ -682,6 +750,40 @@ body {
   color: var(--accent);
   font-weight: 700;
 }
+/* Метка «совпали все параметры» — видна и в общей ленте, а не только когда
+   включён показ идеальных соседей. */
+.card__ideal {
+  display: inline-block;
+  align-self: flex-start;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  border-radius: var(--pill);
+}
+
+/* Анкета, за которой пришли по ссылке из общей ленты. Подсветка гаснет сама:
+   это подсказка «вот она», а не постоянное состояние карточки. */
+.card--highlight {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card--highlight {
+    animation: card-found 2.6s ease-out;
+  }
+}
+@keyframes card-found {
+  0%,
+  70% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
 .card__bio {
   font-size: 14px;
   color: var(--ink-soft);
@@ -764,12 +866,20 @@ body {
 .modal__overlay {
   position: fixed;
   inset: 0;
+  /* dvh, а не vh: на телефоне панели браузера прячутся и появляются, и по vh
+     подложка оказывалась выше экрана — низ формы уходил под край. */
+  height: 100dvh;
   background: rgba(17, 17, 20, 0.55);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 24px;
   overflow-y: auto;
+  /* Докрутили форму до конца — дальше прокрутка НЕ передаётся странице за
+     подложкой. Без этого лента под окном уезжала, и было видно, что окно
+     «висит» поверх живой страницы. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   z-index: 100;
 }
 .modal {
@@ -2123,6 +2233,9 @@ a.gmember:hover {
     margin: 0;
     border-radius: 0;
     min-height: 100%;
+    /* Форма занимает экран целиком, поэтому подложки по краям нет и «мимо»
+       промахнуться нельзя — закрывают только крестиком. */
+    width: 100%;
   }
   .modal__head {
     padding: max(16px, env(safe-area-inset-top)) 18px 16px;
@@ -2130,6 +2243,9 @@ a.gmember:hover {
     top: 0;
     background: var(--surface);
     z-index: 1;
+    /* Шапка прилипшая, а под ней проезжает контент — без своей границы
+       выглядело так, будто текст вылезает из-под заголовка. */
+    border-bottom: 1px solid var(--border);
   }
   .modal__form {
     padding: 18px 18px calc(20px + env(safe-area-inset-bottom));

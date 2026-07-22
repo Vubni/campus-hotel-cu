@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchAdminStats, sendExport } from "../api.js";
 import { CAMPUS } from "../labels.js";
 import { closeWebApp } from "../telegram.js";
+import { useModalLock } from "../useModalLock.js";
 
 // Что кладём в каждый формат — подписи честно объясняют, что человек получит.
 const FORMATS = [
@@ -20,6 +21,9 @@ const SCOPES = [
 ];
 
 export default function AdminPanel({ onClose }) {
+  useModalLock();
+  // Начался ли жест на подложке — иначе окно закрывалось бы от свайпа изнутри.
+  const overlayDown = useRef(false);
   const [stats, setStats] = useState(null);
   const [scope, setScope] = useState("full");
   const [campus, setCampus] = useState(""); // "" — оба кампус-отеля
@@ -51,8 +55,16 @@ export default function AdminPanel({ onClose }) {
   }
 
   return (
-    <div className="modal__overlay" onClick={onClose}>
-      <div className="modal modal--admin" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="modal__overlay"
+      onPointerDown={(e) => {
+        overlayDown.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && overlayDown.current) onClose();
+      }}
+    >
+      <div className="modal modal--admin">
         <div className="modal__head">
           <h2>Админка</h2>
           <button className="modal__close" onClick={onClose}>
