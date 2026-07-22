@@ -40,6 +40,7 @@ import {
   campusRoomsText,
 } from "./labels.js";
 import { getStartParam, initWebApp } from "./telegram.js";
+import { releaseStuckLock } from "./useModalLock.js";
 import { useMyProfile } from "./useMyProfile.js";
 
 const GENDER_KEY = "obshaga_gender";
@@ -214,6 +215,14 @@ export default function App() {
       setIncoming([]);
     }
   }
+
+  // Страховка от страницы, которая осталась пришпиленной от модалки: без неё
+  // приложением нельзя пользоваться совсем, а сам человек починить это не
+  // может. Намеренно без списка зависимостей — проверка стоит одного чтения
+  // свойства, а поймать нужно любой сценарий, включая те, которых мы не знаем.
+  useEffect(() => {
+    releaseStuckLock();
+  });
 
   // Если сайт открыт внутри Telegram — разворачиваем окно Mini App.
   useEffect(() => {
